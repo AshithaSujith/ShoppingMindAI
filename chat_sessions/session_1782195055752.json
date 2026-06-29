@@ -1,0 +1,26 @@
+{
+  "session_id": "session_1782195055752",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good noon",
+      "timestamp": 1782197311.185002
+    },
+    {
+      "role": "assistant",
+      "content": "Good noon! What are you looking to shop for today?",
+      "timestamp": 1782197313.288113
+    },
+    {
+      "role": "user",
+      "content": "i want to buy iphone 15",
+      "timestamp": 1782197324.5038593
+    },
+    {
+      "role": "assistant",
+      "content": "Parsed query for: Apple iPhone 15",
+      "timestamp": 1782197326.20472
+    }
+  ],
+  "last_active": 1782197326.20472
+}

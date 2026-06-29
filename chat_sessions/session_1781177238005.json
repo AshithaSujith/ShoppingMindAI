@@ -1,0 +1,26 @@
+{
+  "session_id": "session_1781177238005",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Poco M8 5G Frost Silver 8GB RAM 128GB ROM",
+      "timestamp": 1781244073.4386318
+    },
+    {
+      "role": "assistant",
+      "content": "That sounds like a great choice! Do you have a specific budget in mind for this phone, or are you just looking for the best current price?",
+      "timestamp": 1781244100.130713
+    },
+    {
+      "role": "user",
+      "content": "No specific budget, just show me the best price",
+      "timestamp": 1781244110.9819446
+    },
+    {
+      "role": "assistant",
+      "content": "Found products for: Poco M8 5G 128GB",
+      "timestamp": 1781244267.8079667
+    }
+  ],
+  "last_active": 1781244267.8079667
+}

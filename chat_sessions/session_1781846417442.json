@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1781846417442",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good morning",
+      "timestamp": 1781846440.3629339
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning! I'm here to help you find the best products. What are you looking to shop for today?",
+      "timestamp": 1781846443.2567687
+    },
+    {
+      "role": "user",
+      "content": "i want to buy tomatoes",
+      "timestamp": 1781846455.4558852
+    },
+    {
+      "role": "assistant",
+      "content": "I can help you find tomatoes. Would you like to specify a type or quantity?",
+      "timestamp": 1781846456.984997
+    },
+    {
+      "role": "user",
+      "content": "Cherry, Pre-packed, Yes",
+      "timestamp": 1781846472.3414214
+    },
+    {
+      "role": "assistant",
+      "content": "Parsed query for: cherry tomatoes pre packed",
+      "timestamp": 1781846473.6546543
+    }
+  ],
+  "last_active": 1781846473.6546543
+}

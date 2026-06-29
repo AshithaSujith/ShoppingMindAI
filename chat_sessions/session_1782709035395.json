@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1782709035395",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good morning",
+      "timestamp": 1782709056.3198235
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning! How can I help you with your shopping today? Are you looking for a specific product or need a recommendation?",
+      "timestamp": 1782709057.7368236
+    },
+    {
+      "role": "user",
+      "content": "i want to buy cheese",
+      "timestamp": 1782709068.817833
+    },
+    {
+      "role": "assistant",
+      "content": "I'd be happy to help you find some cheese. To narrow it down, what type of cheese are you looking for? (e.g., Cheddar, Mozzarella, Parmesan, Brie, etc.)",
+      "timestamp": 1782709070.2488244
+    },
+    {
+      "role": "user",
+      "content": "Mozzarella",
+      "timestamp": 1782709074.5798318
+    },
+    {
+      "role": "assistant",
+      "content": "Great choice. To help you find the right mozzarella, please select your preferences below.",
+      "timestamp": 1782709075.9468257
+    }
+  ],
+  "last_active": 1782709075.9468257
+}

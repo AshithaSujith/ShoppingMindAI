@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1782384755981",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good evening",
+      "timestamp": 1782384779.0831096
+    },
+    {
+      "role": "assistant",
+      "content": "Good evening! How can I help you find the right product today?",
+      "timestamp": 1782384780.665223
+    },
+    {
+      "role": "user",
+      "content": "i want to buy milk",
+      "timestamp": 1782384789.0079937
+    },
+    {
+      "role": "assistant",
+      "content": "To help you find the right milk, could you please specify the type you are looking for?",
+      "timestamp": 1782384790.7196622
+    },
+    {
+      "role": "user",
+      "content": "Oat Milk",
+      "timestamp": 1782384796.1601064
+    },
+    {
+      "role": "assistant",
+      "content": "CONFIRMED_STATE:{\"confirmed_canonical_product\": {\"intent_type\": \"consumable\", \"product_type\": \"oat milk\"}, \"search_query\": \"oat milk\", \"filters_offered_this_turn\": [\"brand\", \"fat_content\", \"sweetening\", \"packaging_type\", \"quantity\", \"price_range\"]}",
+      "timestamp": 1782384798.2019842
+    }
+  ],
+  "last_active": 1782384798.2019842
+}

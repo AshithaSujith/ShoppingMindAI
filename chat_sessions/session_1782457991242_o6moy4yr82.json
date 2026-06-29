@@ -1,0 +1,16 @@
+{
+  "session_id": "session_1782457991242_o6moy4yr82",
+  "messages": [
+    {
+      "role": "user",
+      "content": "i want to buy lenovo chrome book",
+      "timestamp": 1782458001.4950972
+    },
+    {
+      "role": "assistant",
+      "content": "To help you find the right Lenovo Chromebook, please select your preferences.",
+      "timestamp": 1782458004.4444084
+    }
+  ],
+  "last_active": 1782458004.4444084
+}

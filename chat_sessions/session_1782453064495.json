@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1782453064495",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..morning",
+      "timestamp": 1782453122.9958906
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning! What are you looking to shop for today?",
+      "timestamp": 1782453129.6862433
+    },
+    {
+      "role": "user",
+      "content": "i want to buy milk",
+      "timestamp": 1782453155.5153637
+    },
+    {
+      "role": "assistant",
+      "content": "To help you find the right milk, could you please specify the type you are looking for?",
+      "timestamp": 1782453159.339633
+    },
+    {
+      "role": "user",
+      "content": "Toned Milk",
+      "timestamp": 1782453176.1199822
+    },
+    {
+      "role": "assistant",
+      "content": "CONFIRMED_STATE:{\"confirmed_canonical_product\": {\"intent_type\": \"consumable\", \"product_type\": \"Toned Milk\"}, \"search_query\": \"Toned Milk\", \"filters_offered_this_turn\": [\"brand\", \"packaging_type\", \"quantity\", \"price_range\"]}",
+      "timestamp": 1782453178.2887375
+    }
+  ],
+  "last_active": 1782453178.2887375
+}

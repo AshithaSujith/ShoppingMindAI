@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1782364879006",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey...gd morning",
+      "timestamp": 1782364919.7230191
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning! How can I help you find the perfect product today?",
+      "timestamp": 1782364921.563785
+    },
+    {
+      "role": "user",
+      "content": "i want to buy a mobile phone",
+      "timestamp": 1782364933.614847
+    },
+    {
+      "role": "assistant",
+      "content": "To help you find the right mobile phone, please select your preferences:",
+      "timestamp": 1782364935.6618686
+    },
+    {
+      "role": "user",
+      "content": "brand: Samsung, ram: 4GB, storage: 64GB, price_range: ₹15,000 - ₹30,000, display_type: No Preference, network_connectivity: 5G",
+      "timestamp": 1782364957.3370583
+    },
+    {
+      "role": "assistant",
+      "content": "CONFIRMED_STATE:{\"confirmed_canonical_product\": {\"intent_type\": \"main_product\", \"brand\": \"Samsung\", \"product_type\": \"mobile phone\", \"attributes\": \"{'ram': '4GB', 'storage': '64GB', 'network_connectivity': '5G'}\"}, \"search_query\": \"Samsung 5G mobile phone 4GB RAM 64GB storage\", \"filters_offered_this_turn\": [\"price_range\", \"display_type\"]}",
+      "timestamp": 1782365022.14164
+    }
+  ],
+  "last_active": 1782365022.14164
+}

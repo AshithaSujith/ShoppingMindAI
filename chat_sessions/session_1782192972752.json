@@ -1,0 +1,31 @@
+{
+  "session_id": "session_1782192972752",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey buddy",
+      "timestamp": 1782193143.4126332
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! I'm here to help you find exactly what you're looking for. What can I help you shop for today?",
+      "timestamp": 1782193144.4556453
+    },
+    {
+      "role": "user",
+      "content": "i want to buy a churidhar",
+      "timestamp": 1782193155.5321648
+    },
+    {
+      "role": "assistant",
+      "content": "Please provide more details.",
+      "timestamp": 1782193157.0383286
+    },
+    {
+      "role": "user",
+      "content": "Anarkali Churidar",
+      "timestamp": 1782193193.4830353
+    }
+  ],
+  "last_active": 1782193193.4830353
+}

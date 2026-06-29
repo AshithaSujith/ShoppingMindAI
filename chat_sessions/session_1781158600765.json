@@ -1,0 +1,16 @@
+{
+  "session_id": "session_1781158600765",
+  "messages": [
+    {
+      "role": "user",
+      "content": "PHILIPS Air fryer for Home, 4.1 Liter, with RapidAir Technology (Black), with additional 1 Yr Warranty by Philips, uses up to 90% less fat (HD9200/90)",
+      "timestamp": 1781173612.503895
+    },
+    {
+      "role": "assistant",
+      "content": "Found products for: Philips HD9200 Air fryer",
+      "timestamp": 1781173659.4357867
+    }
+  ],
+  "last_active": 1781173659.4357867
+}

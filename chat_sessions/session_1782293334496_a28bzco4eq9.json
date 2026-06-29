@@ -1,0 +1,46 @@
+{
+  "session_id": "session_1782293334496_a28bzco4eq9",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey gd noon",
+      "timestamp": 1782293403.185352
+    },
+    {
+      "role": "assistant",
+      "content": "Good afternoon! What are you looking to shop for today?",
+      "timestamp": 1782293406.4419878
+    },
+    {
+      "role": "user",
+      "content": "i want to buy yogurt",
+      "timestamp": 1782293443.6581342
+    },
+    {
+      "role": "assistant",
+      "content": "To help you find the right yogurt, could you please specify the type you are looking for?",
+      "timestamp": 1782293445.6094038
+    },
+    {
+      "role": "user",
+      "content": "Plain/Natural Yogurt",
+      "timestamp": 1782293450.1200047
+    },
+    {
+      "role": "assistant",
+      "content": "CONFIRMED_STATE:{\"confirmed_canonical_product\": {\"intent_type\": \"consumable\", \"product_type\": \"yogurt\", \"variant\": \"plain/natural\"}, \"search_query\": \"plain natural yogurt\", \"filters_offered_this_turn\": [\"brand\", \"fat_content\", \"packaging_type\", \"weight\", \"price_range\"]}",
+      "timestamp": 1782293498.0179482
+    },
+    {
+      "role": "user",
+      "content": "brand: Milky Mist, fat_content: Full Cream, packaging_type: Cup, weight: 200g - 500g, price_range: No Preference",
+      "timestamp": 1782293709.4609277
+    },
+    {
+      "role": "assistant",
+      "content": "CONFIRMED_STATE:{\"confirmed_canonical_product\": {\"intent_type\": \"consumable\", \"brand\": \"Milky Mist\", \"product_type\": \"yogurt\", \"variant\": \"plain/natural\", \"attributes\": \"{'fat_content': 'Full Cream', 'packaging_type': 'Cup', 'weight': '200g - 500g'}\"}, \"search_query\": \"Milky Mist plain natural yogurt full cream cup\", \"filters_offered_this_turn\": [\"brand\", \"fat_content\", \"packaging_type\", \"weight\", \"price_range\"]}",
+      "timestamp": 1782293789.1464925
+    }
+  ],
+  "last_active": 1782293789.1464925
+}

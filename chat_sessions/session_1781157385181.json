@@ -1,0 +1,26 @@
+{
+  "session_id": "session_1781157385181",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Lenovo IdeaPad Slim 3 Intel Core i3 11th Gen 8GB RAM 256GB SSD",
+      "timestamp": 1781158546.8600833
+    },
+    {
+      "role": "assistant",
+      "content": "That sounds like a great choice! To help me find the best deal for you, do you have a specific budget in mind for this laptop?",
+      "timestamp": 1781158548.8966475
+    },
+    {
+      "role": "user",
+      "content": "Lenovo IdeaPad Slim 3 Intel Core i3 11th Gen 8GB RAM 256GB SSD",
+      "timestamp": 1781158558.9187732
+    },
+    {
+      "role": "assistant",
+      "content": "Found products for: Lenovo IdeaPad Slim 3 i3",
+      "timestamp": 1781158598.5742862
+    }
+  ],
+  "last_active": 1781158598.5742862
+}

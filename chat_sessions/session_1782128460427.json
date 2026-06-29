@@ -1,0 +1,26 @@
+{
+  "session_id": "session_1782128460427",
+  "messages": [
+    {
+      "role": "user",
+      "content": "who is the prime minister of india",
+      "timestamp": 1782129364.4680657
+    },
+    {
+      "role": "assistant",
+      "content": "I specialize in helping you find and compare products. Please let me know what you are looking to shop for today.",
+      "timestamp": 1782129366.0559123
+    },
+    {
+      "role": "user",
+      "content": "i want to know who is the prime minister of india",
+      "timestamp": 1782129395.200536
+    },
+    {
+      "role": "assistant",
+      "content": "I specialize in helping you find and compare products. Please let me know what you are looking to shop for today.",
+      "timestamp": 1782129397.9714267
+    }
+  ],
+  "last_active": 1782129397.9714267
+}

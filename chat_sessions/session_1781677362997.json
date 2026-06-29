@@ -1,0 +1,16 @@
+{
+  "session_id": "session_1781677362997",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Nike Shoes",
+      "timestamp": 1781677381.1967244
+    },
+    {
+      "role": "assistant",
+      "content": "Found products for: Nike shoes",
+      "timestamp": 1781677430.9658673
+    }
+  ],
+  "last_active": 1781677430.9658673
+}

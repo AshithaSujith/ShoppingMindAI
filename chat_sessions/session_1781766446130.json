@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1781766446130",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good morning",
+      "timestamp": 1781766521.1722698
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning! I'm here to help you find the best products. What are you looking to shop for today?",
+      "timestamp": 1781766534.1702404
+    },
+    {
+      "role": "user",
+      "content": "i want to buy an acer laptop",
+      "timestamp": 1781766924.4348488
+    },
+    {
+      "role": "assistant",
+      "content": "I can help you find an Acer laptop. To narrow down the options, could you specify your preferences?",
+      "timestamp": 1781766927.8013766
+    },
+    {
+      "role": "user",
+      "content": "Aspire, Intel Core i5, 8GB, Office/Work",
+      "timestamp": 1781767537.8932168
+    },
+    {
+      "role": "assistant",
+      "content": "Parsed query for: Acer Aspire i5 8GB laptop",
+      "timestamp": 1781767540.0180254
+    }
+  ],
+  "last_active": 1781767540.0180254
+}

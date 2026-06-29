@@ -1,0 +1,26 @@
+{
+  "session_id": "session_1782456801994",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..morning",
+      "timestamp": 1782456833.7133603
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning! How can I help you with your shopping today? Are you looking for a specific product, or do you need a recommendation?",
+      "timestamp": 1782456836.010589
+    },
+    {
+      "role": "user",
+      "content": "i want to buy curd",
+      "timestamp": 1782456856.2588782
+    },
+    {
+      "role": "assistant",
+      "content": "I can help you find curd. To narrow down the options, please let me know your preferences.",
+      "timestamp": 1782456858.0230231
+    }
+  ],
+  "last_active": 1782456858.0230231
+}

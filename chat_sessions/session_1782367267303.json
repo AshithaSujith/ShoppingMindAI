@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1782367267303",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good morning",
+      "timestamp": 1782367281.327748
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning! How can I help you find what you're looking for today?",
+      "timestamp": 1782367282.6265838
+    },
+    {
+      "role": "user",
+      "content": "i want to buy titan watch",
+      "timestamp": 1782367292.1663194
+    },
+    {
+      "role": "assistant",
+      "content": "CONFIRMED_STATE:{\"confirmed_canonical_product\": {\"intent_type\": \"main_product\", \"brand\": \"Titan\", \"product_type\": \"watch\"}, \"search_query\": \"Titan watch\", \"filters_offered_this_turn\": [\"gender\", \"display_type\", \"strap_material\", \"dial_shape\", \"price_range\"]}",
+      "timestamp": 1782367293.726729
+    },
+    {
+      "role": "user",
+      "content": "i want to buy titan watch",
+      "timestamp": 1782367294.0938828
+    },
+    {
+      "role": "assistant",
+      "content": "To help you find the perfect Titan watch, please select your preferences below.",
+      "timestamp": 1782367296.364098
+    }
+  ],
+  "last_active": 1782367296.364098
+}

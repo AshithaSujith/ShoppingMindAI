@@ -1,0 +1,16 @@
+{
+  "session_id": "session_1782194990486",
+  "messages": [
+    {
+      "role": "user",
+      "content": "i want to buy tomatoes",
+      "timestamp": 1782195003.5324495
+    },
+    {
+      "role": "assistant",
+      "content": "Parsed query for: tomatoes",
+      "timestamp": 1782195005.1268342
+    }
+  ],
+  "last_active": 1782195005.1268342
+}

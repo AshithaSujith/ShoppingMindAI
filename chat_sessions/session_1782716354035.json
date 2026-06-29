@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1782716354035",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good morning",
+      "timestamp": 1782716400.7913966
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning! How can I help you with your shopping today? Are you looking for a specific product, or do you need a recommendation?",
+      "timestamp": 1782716402.0413835
+    },
+    {
+      "role": "user",
+      "content": "i  want to buy lenovo laptop",
+      "timestamp": 1782716439.316252
+    },
+    {
+      "role": "assistant",
+      "content": "To help you find the right Lenovo laptop, could you please tell me what you will primarily be using it for (e.g., gaming, office work, creative design, or general home use)?",
+      "timestamp": 1782716440.9665082
+    },
+    {
+      "role": "user",
+      "content": "General/Home (IdeaPad)",
+      "timestamp": 1782716466.4417863
+    },
+    {
+      "role": "assistant",
+      "content": "Great, the Lenovo IdeaPad is a perfect choice for home use. To narrow down the best options for you, please select your preferences below.",
+      "timestamp": 1782716470.8519452
+    }
+  ],
+  "last_active": 1782716470.8519452
+}

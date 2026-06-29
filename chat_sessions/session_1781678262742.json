@@ -1,0 +1,16 @@
+{
+  "session_id": "session_1781678262742",
+  "messages": [
+    {
+      "role": "user",
+      "content": "godrej refrigerator",
+      "timestamp": 1781678289.7927547
+    },
+    {
+      "role": "assistant",
+      "content": "Found products for: Godrej refrigerator",
+      "timestamp": 1781678383.3266118
+    }
+  ],
+  "last_active": 1781678383.3266118
+}

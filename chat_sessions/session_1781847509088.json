@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1781847509088",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good morning",
+      "timestamp": 1781847520.370212
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning! I'm here to help you find the best products. What are you looking to shop for today?",
+      "timestamp": 1781847522.729978
+    },
+    {
+      "role": "user",
+      "content": "i want to buy an iphone",
+      "timestamp": 1781847542.0254986
+    },
+    {
+      "role": "assistant",
+      "content": "I can help you find an iPhone. Which model or series are you interested in?",
+      "timestamp": 1781847544.3432727
+    },
+    {
+      "role": "user",
+      "content": "iPhone 16, 128GB, New",
+      "timestamp": 1781847559.3590696
+    },
+    {
+      "role": "assistant",
+      "content": "Parsed query for: iPhone 16 128GB",
+      "timestamp": 1781847561.8970468
+    }
+  ],
+  "last_active": 1781847561.8970468
+}

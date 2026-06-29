@@ -1,0 +1,26 @@
+{
+  "session_id": "session_1782192873726",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good morning",
+      "timestamp": 1782192915.5784225
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning! How can I help you find what you're looking for today?",
+      "timestamp": 1782192916.6953032
+    },
+    {
+      "role": "user",
+      "content": "i want to buy a churidhar",
+      "timestamp": 1782192929.3643503
+    },
+    {
+      "role": "assistant",
+      "content": "Please provide more details.",
+      "timestamp": 1782192930.7283509
+    }
+  ],
+  "last_active": 1782192930.7283509
+}

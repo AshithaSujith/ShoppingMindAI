@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1782281033187",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey hey",
+      "timestamp": 1782281037.166144
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! What can I help you find today?",
+      "timestamp": 1782281038.7813334
+    },
+    {
+      "role": "user",
+      "content": "i want to buy tomatoes",
+      "timestamp": 1782281045.90986
+    },
+    {
+      "role": "assistant",
+      "content": "I can help you find tomatoes. Please let me know your preferences to narrow down the selection.",
+      "timestamp": 1782281049.7339888
+    },
+    {
+      "role": "user",
+      "content": "variety: Cherry, packaging: Loose, farming_method: Organic, ripeness: Firm/Unripe, price_range: $2 - $5",
+      "timestamp": 1782281064.526673
+    },
+    {
+      "role": "assistant",
+      "content": "Parsed query for: organic cherry tomatoes loose firm",
+      "timestamp": 1782281069.956998
+    }
+  ],
+  "last_active": 1782281069.956998
+}

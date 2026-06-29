@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1781673430626",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Nike Air Zoom",
+      "timestamp": 1781673446.1193998
+    },
+    {
+      "role": "assistant",
+      "content": "To help you find the right pair, are you looking for Nike Air Zoom shoes for men or women?",
+      "timestamp": 1781673447.4690933
+    },
+    {
+      "role": "user",
+      "content": "Men",
+      "timestamp": 1781673449.4199498
+    },
+    {
+      "role": "assistant",
+      "content": "Got it, Nike Air Zoom for men! What size do you need?",
+      "timestamp": 1781673450.4216192
+    },
+    {
+      "role": "user",
+      "content": "UK 8",
+      "timestamp": 1781673452.738077
+    },
+    {
+      "role": "assistant",
+      "content": "Found products for: Nike Air Zoom Men UK 8",
+      "timestamp": 1781673503.0142558
+    }
+  ],
+  "last_active": 1781673503.0142558
+}

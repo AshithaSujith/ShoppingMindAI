@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1781848388840",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good morning",
+      "timestamp": 1781848431.2435808
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning! I'm here to help you find the best products. What are you looking to shop for today?",
+      "timestamp": 1781848432.7707741
+    },
+    {
+      "role": "user",
+      "content": "i want to buy a watch",
+      "timestamp": 1781848713.8109744
+    },
+    {
+      "role": "assistant",
+      "content": "I can help you find a watch. To narrow it down, what type of watch are you looking for?",
+      "timestamp": 1781848715.4649572
+    },
+    {
+      "role": "user",
+      "content": "Smartwatch, Women",
+      "timestamp": 1781848774.6158054
+    },
+    {
+      "role": "assistant",
+      "content": "Parsed query for: smartwatch women",
+      "timestamp": 1781848776.833576
+    }
+  ],
+  "last_active": 1781848776.8343706
+}

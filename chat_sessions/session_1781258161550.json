@@ -1,0 +1,41 @@
+{
+  "session_id": "session_1781258161550",
+  "messages": [
+    {
+      "role": "user",
+      "content": "nike running shoe",
+      "timestamp": 1781634387.2871604
+    },
+    {
+      "role": "assistant",
+      "content": "I'd love to help you find the perfect pair of Nike running shoes! Are you looking for men's or women's styles?",
+      "timestamp": 1781634394.865721
+    },
+    {
+      "role": "user",
+      "content": "Men's",
+      "timestamp": 1781634402.5297606
+    },
+    {
+      "role": "assistant",
+      "content": "Got it, men's Nike running shoes! What is your shoe size?",
+      "timestamp": 1781634404.0987098
+    },
+    {
+      "role": "user",
+      "content": "8",
+      "timestamp": 1781634412.4245353
+    },
+    {
+      "role": "assistant",
+      "content": "Great, I've got your size! Do you have a specific budget in mind for these running shoes?",
+      "timestamp": 1781634413.8644323
+    },
+    {
+      "role": "user",
+      "content": "No preference",
+      "timestamp": 1781634416.3631551
+    }
+  ],
+  "last_active": 1781634416.3631551
+}

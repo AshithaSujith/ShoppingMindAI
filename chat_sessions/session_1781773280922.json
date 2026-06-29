@@ -1,0 +1,36 @@
+{
+  "session_id": "session_1781773280922",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good noon",
+      "timestamp": 1781773295.5247087
+    },
+    {
+      "role": "assistant",
+      "content": "Good noon! I'm here to help you find the best products. What are you looking to shop for today?",
+      "timestamp": 1781773298.7419996
+    },
+    {
+      "role": "user",
+      "content": "i want to buy a phone",
+      "timestamp": 1781773316.7804813
+    },
+    {
+      "role": "assistant",
+      "content": "I can help you find a phone. To narrow down the options, could you specify your preferred brand, budget range, or any key features you are looking for?",
+      "timestamp": 1781773319.0108085
+    },
+    {
+      "role": "user",
+      "content": "oppo",
+      "timestamp": 1781773353.0251648
+    },
+    {
+      "role": "assistant",
+      "content": "Great, you're looking for an Oppo phone. Please specify your budget range or any preferred series/features to help me find the right model.",
+      "timestamp": 1781773355.6751735
+    }
+  ],
+  "last_active": 1781773355.6751735
+}

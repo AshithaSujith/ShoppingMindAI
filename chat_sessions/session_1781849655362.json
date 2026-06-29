@@ -1,0 +1,16 @@
+{
+  "session_id": "session_1781849655362",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..whatsup",
+      "timestamp": 1781849753.1454725
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! I'm ShopMind AI. I'm here to help you find the best products at the best prices. What are you looking to shop for today?",
+      "timestamp": 1781849754.2385902
+    }
+  ],
+  "last_active": 1781849754.2385902
+}

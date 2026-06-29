@@ -1,0 +1,26 @@
+{
+  "session_id": "session_1782124366165",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey..good evening",
+      "timestamp": 1782124399.4026182
+    },
+    {
+      "role": "assistant",
+      "content": "Good evening! How can I help you find the perfect product today?",
+      "timestamp": 1782124402.3113973
+    },
+    {
+      "role": "user",
+      "content": "i want to buy a titan watch",
+      "timestamp": 1782124425.5323505
+    },
+    {
+      "role": "assistant",
+      "content": "I can help you find the right Titan watch. Please select your preferences to narrow down the options.",
+      "timestamp": 1782124428.6860068
+    }
+  ],
+  "last_active": 1782124428.6860068
+}

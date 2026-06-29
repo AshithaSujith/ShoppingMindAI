@@ -1,0 +1,26 @@
+{
+  "session_id": "session_1781689177103",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Nike Air Zoom",
+      "timestamp": 1781689186.7720592
+    },
+    {
+      "role": "assistant",
+      "content": "I found several Nike Air Zoom models. Please select your preferences to narrow down the results.",
+      "timestamp": 1781689188.1686244
+    },
+    {
+      "role": "user",
+      "content": "Men",
+      "timestamp": 1781689195.9726384
+    },
+    {
+      "role": "assistant",
+      "content": "Got it. Please select your preferences to narrow down the Nike Air Zoom models.",
+      "timestamp": 1781689197.1758533
+    }
+  ],
+  "last_active": 1781689197.1758533
+}
