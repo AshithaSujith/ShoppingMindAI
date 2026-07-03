@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+chat_sessions/
+.env
+amazon_page_dump.html
+flipkart_dump.html
+*.pyc
