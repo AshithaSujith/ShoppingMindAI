@@ -1,4 +1,4 @@
-from crud import (
+from app.database.crud import (
     save_message,
     save_conversation,
     get_history,
