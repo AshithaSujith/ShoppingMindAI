@@ -1,9 +1,9 @@
 from sqlalchemy import desc
 from datetime import datetime
 
-from database import SessionLocal
-from models import Session as SessionModel
-from models import Message
+from app.database.database import SessionLocal
+from app.database.models import Session as SessionModel
+from app.database.models import Message
 
 
 def create_session(session_id: str):

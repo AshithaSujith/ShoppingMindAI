@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-genai.configure(api_key=os.getenv("AIzaSyB8k3lwmI3HaHJ9r2FXTb6ge4sPnjC6Ga8"))
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 for m in genai.list_models():
     if 'generateContent' in m.supported_generation_methods:
