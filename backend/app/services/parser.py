@@ -2,14 +2,14 @@ import os       # Used to read environment variables (like the Gemini API key)
 import json     # Used to parse Gemini's JSON response into a Python dictionary
 import re       # Used for pattern matching with regular expressions (e.g. detecting greetings)
 import ast
-from google import genai               # Google's Gemini AI client library
-from google.genai import types         # Gemini config types (used to set temperature, max tokens, etc.)
+
 from dotenv import load_dotenv         # Reads the .env file so we can use secrets like API keys
+from app.services.providers.provider_factory import get_provider
 
 load_dotenv()   # Load the .env file — after this, os.getenv("GEMINI_API_KEY") will work
 
-# Create a Gemini client using our API key from the .env file
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+provider = get_provider()
 
 # Load the shopping prompt from prompt.txt — this is the big instruction we send to Gemini
 # It tells Gemini how to parse product queries and what JSON format to respond in
@@ -225,14 +225,11 @@ def get_chat_reply(user_text: str) -> str:
     # Sends a casual/greeting message to Gemini and gets back a friendly reply
     # This is separate from the main shopping parser so greetings feel natural
     try:
-        response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",     # Lightweight model — fast and cheap for simple replies
-            config=types.GenerateContentConfig(
-                system_instruction=CHAT_SYSTEM_PROMPT,   # Use the chat-only prompt
-                temperature=0.9,                         # Higher temperature = more varied/creative replies
-                max_output_tokens=100,                   # Keep the reply short
-            ),
-            contents=user_text,   # The user's greeting message
+        response = provider.generate(
+            system_prompt=CHAT_SYSTEM_PROMPT,
+            user_input=user_text,
+            temperature=0.9,
+            max_tokens=100,
         )
         return response.text.strip()   # Return the cleaned reply text
 
@@ -279,14 +276,11 @@ def get_intent(full_query: str) -> dict:
 
     # ── Step 3: Send the full context to Gemini with the shopping prompt ───
     try:
-        response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,   # The big shopping parser prompt from prompt.txt
-                temperature=0.2,                    # Low temperature = consistent, predictable JSON output
-                max_output_tokens=500,              # Allow enough tokens for a full JSON response
-            ),
-            contents=f"USER QUERY:\n{full_query}",   # Send the full conversation context
+        response = provider.generate(
+            system_prompt=SYSTEM_PROMPT,
+            user_input=f"USER QUERY:\n{full_query}",
+            temperature=0.2,
+            max_tokens=500,
         )
 
         # Clean up Gemini's response — remove markdown code fences if present
