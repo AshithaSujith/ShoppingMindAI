@@ -34,4 +34,4 @@ class GeminiProvider(BaseProvider):
             contents=user_input,
         )
 
-        return response
+        return response.text
