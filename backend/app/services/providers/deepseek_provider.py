@@ -24,7 +24,7 @@ class DeepSeekProvider(BaseProvider):
         max_tokens: int,
     ):
         response = self.client.chat.completions.create(
-            model="deepseek-chat",
+            model="deepseek-v4-pro",
             messages=[
                 {
                     "role": "system",
@@ -37,6 +37,11 @@ class DeepSeekProvider(BaseProvider):
             ],
             temperature=temperature,
             max_tokens=max_tokens,
+            extra_body={
+                "thinking": {
+                    "type": "disabled"
+                }
+            }
         )
 
         usage = response.usage
@@ -48,5 +53,12 @@ class DeepSeekProvider(BaseProvider):
         print(f"Cache Hit Tokens  : {usage.prompt_cache_hit_tokens}")
         print(f"Cache Miss Tokens : {usage.prompt_cache_miss_tokens}")
         print("====================================\n")
+        print("\n========== FULL RESPONSE ==========")
+        print(response.model_dump())
+        print("===================================")
 
-        return response.choices[0].message.content
+        print("Finish reason:", response.choices[0].finish_reason)
+        print("Message:", response.choices[0].message)
+        print("Content:", repr(response.choices[0].message.content))
+
+        return response.choices[0].message.content or ""

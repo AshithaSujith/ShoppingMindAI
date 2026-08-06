@@ -8,7 +8,7 @@ from app.schemas.requests import (
     ScrapeRequest,
 )
 
-from app.services.parser import get_intent
+from app.services.parser import get_intent, debug_log
 from app.services.scraper import (
     scrape_amazon,
     scrape_flipkart,
@@ -19,7 +19,6 @@ from app.services.chatbot import ChatBot
 
 from app.utils.helpers import (
     normalize_product,
-    should_ask_filters,
 )
 
 router = APIRouter()
@@ -35,8 +34,8 @@ async def search(
         query = payload.query.strip()
         session_id = payload.session_id
 
-        print(f"\n{'=' * 50}")
-        print(f"USER [{session_id}]: {query}")
+        debug_log(f"\n{'=' * 50}")
+        debug_log(f"USER [{session_id}]: {query}")
 
         if not query:
             return {"status": "error", "message": "Empty query received."}
@@ -50,21 +49,35 @@ async def search(
         # referenced context_lines even when it was never created — caused a
         # NameError crash on every first message)
         if is_first_message:
-            print("FIRST MESSAGE -> Skip DB History")
+            debug_log("FIRST MESSAGE -> Skip DB History")
 
             full_context = f"""Latest User Input:
 {query}""".strip()
 
         else:
-            print("FOLLOW-UP MESSAGE -> Load DB History")
+            debug_log("FOLLOW-UP MESSAGE -> Load DB History")
 
             context_lines = [
                 f"{m['role'].upper()}: {m['content']}"
                 for m in history
             ]
 
+            # Count how many clarifying (non-CONFIRMED_STATE) assistant replies
+            # have already gone out this session, so the model can be told —
+            # per prompt.txt Section 7a — to stop asking and move on.
+            conversation_round = sum(
+                1
+                for m in history
+                if m["role"] == "assistant"
+                and not m["content"].startswith("CONFIRMED_STATE:")
+            )
+
+            debug_log(f"CONVERSATION_ROUND: {conversation_round}")
+
             full_context = f"""Previous Conversation:
 {chr(10).join(context_lines)}
+
+CONVERSATION_ROUND: {conversation_round}
 
 Latest User Input:
 {query}""".strip()
@@ -75,7 +88,7 @@ Latest User Input:
 
         search_mode = result.get("search_mode", "exact_search")
 
-        print(f"INTENT RESULT: {result.get('status')} | MODE: {search_mode}")
+        debug_log(f"INTENT RESULT: {result.get('status')} | MODE: {search_mode}")
 
         if result.get("status") == "ready":
             data = result.get("data", {})
@@ -83,30 +96,7 @@ Latest User Input:
             search_query = data.get("search_query", "")
             intent_type = canonical_product.get("intent_type", "main_product")
 
-            if should_ask_filters(query):
-                message = "Please give a few more details so I can find the right product."
-                background_tasks.add_task(
-                    chatbot.save_conversation,
-                    session_id,
-                    query,
-                    message,
-                )
-
-                print("\n========== FILTERS ==========")
-                print(result.get("filters", {}))
-                print("=============================\n")
-
-                return {
-                    "status": "success",
-                    "data": {
-                        "type": "filters",
-                        "message": message,
-                        "filters": data.get("filters", {}),
-                        "category": canonical_product.get("category", "general"),
-                    },
-                }
-
-            print(f"SEARCH QUERY: {search_query}")
+            debug_log(f"SEARCH QUERY: {search_query}")
 
             if not search_query:
                 return {"status": "error", "message": "Failed to generate search query."}
@@ -124,6 +114,15 @@ Latest User Input:
                     "search_query": search_query,
                     "filters_offered_this_turn": list(data.get("filters", {}).keys()),
                 }
+
+                assistant_message = result.get("message", "")
+                if assistant_message:
+                    background_tasks.add_task(
+                        chatbot.save_conversation,
+                        session_id,
+                        query,
+                        assistant_message,
+                    )
 
                 background_tasks.add_task(
                     chatbot.save_conversation,
@@ -154,26 +153,6 @@ Latest User Input:
                 },
             }
 
-        elif result.get("status") == "clarification":
-            question = result.get("question", "Could you give me more details?")
-            background_tasks.add_task(
-                chatbot.save_conversation,
-                session_id,
-                query,
-                question,
-            )
-
-            return {
-                "status": "success",
-                "data": {
-                    "type": "clarify",
-                    "message": question,
-                    "options": result.get("options", []),
-                    "missing_attributes": result.get("missing_attributes", []),
-                    "filters": result.get("filters", {}),
-                },
-            }
-
         elif result.get("status") == "refine":
             message = result.get("message", "Please select your preferences.")
             background_tasks.add_task(
@@ -186,10 +165,56 @@ Latest User Input:
             return {
                 "status": "success",
                 "data": {
-                    "type": "filters",
-                    "message": message,
+                    "type": "conversation",
+                    "assistant_message": message,
+                    "confidence": result.get("confidence", "medium"),
                     "filters": result.get("filters", {}),
                     "category": result.get("category", "general"),
+                    "next_action": "refine",
+                },
+            }
+        elif result.get("status") == "conversation":
+            message = result.get("assistant_message", "")
+
+            background_tasks.add_task(
+                chatbot.save_conversation,
+                session_id,
+                query,
+                message,
+            )   
+            return {
+                    "status": "success",
+                    "data": {
+                        "type": "conversation",
+                        "message": message,
+                        "cards": result.get("cards", []),
+                        "confidence": result.get("confidence", "medium"),
+                        "questions": result.get("questions", []),
+                        "chips": result.get("chips", []),
+                        "recommendations": result.get("recommendations", []),
+                        "comparison": result.get("comparison"),
+                        "product_line": result.get("product_line"),
+                        "next_action": result.get("next_action", "conversation"),
+                        "missing_required_attributes": result.get(
+                            "missing_required_attributes", []
+                        ),
+                    },
+                }
+        elif result.get("status") == "results":
+            background_tasks.add_task(
+                chatbot.save_conversation,
+                session_id,
+                query,
+                result.get("message", ""),
+            )
+
+            return {
+                "status": "success",
+                "data": {
+                    "type": "results",
+                    "message": result.get("message", ""),
+                    "products": result.get("products", []),
+                    "follow_ups": result.get("follow_ups", []),
                 },
             }
 
@@ -207,6 +232,7 @@ Latest User Input:
                 "data": {
                     "type": "text",
                     "message": message,
+                    "cards": result.get("cards", []),
                 },
             }
 
@@ -235,7 +261,7 @@ Latest User Input:
             "message": result.get("message", "Something went wrong. Please try again."),
         }
     except Exception as e:
-        print(f"MAIN API ERROR: {e}")
+        debug_log(f"MAIN API ERROR: {e}")
         return {"status": "error", "message": str(e)}
 
 
@@ -250,8 +276,8 @@ async def scrape(payload: ScrapeRequest):
             "main_product"
         )
 
-        print(f"\n{'=' * 60}")
-        print(f"SCRAPING: {search_query}")
+        debug_log(f"\n{'=' * 60}")
+        debug_log(f"SCRAPING: {search_query}")
 
         amazon_task = asyncio.to_thread(
             scrape_with_fallback,
@@ -324,7 +350,7 @@ async def scrape(payload: ScrapeRequest):
         }
 
     except Exception as e:
-        print(f"SCRAPE ERROR: {e}")
+        debug_log(f"SCRAPE ERROR: {e}")
         return {
             "status": "error",
             "message": str(e),

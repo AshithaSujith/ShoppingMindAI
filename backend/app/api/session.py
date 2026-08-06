@@ -10,10 +10,11 @@ chatbot = ChatBot()
 @router.post("/session/clear")
 async def clear_session(payload: ClearRequest):
     print("NEW CHAT:", payload.session_id)
+    chatbot.clear(payload.session_id)
 
     return {
         "status": "success",
-        "message": "New session started"
+        "message": "New session started and history cleared"
     }
 
 @router.get("/session/history/{session_id}")

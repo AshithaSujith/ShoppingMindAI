@@ -23,7 +23,7 @@ GREETING_PATTERNS = re.compile(
     r"^\s*(hi|hello|hey|hii|helo|sup|yo|howdy|greetings|"
     r"good\s*(morning|afternoon|evening|night|day)|"
     r"what'?s\s*up|how\s*(are\s*you|r\s*u)|"
-    r"namaste|namaskar|vanakkam|salaam)\s*[!.,?]*\s*$",
+    r"namaste|namaskar|vanakkam|)\s*[!.,?]*\s*$",
     re.IGNORECASE,
 )
 
@@ -42,6 +42,10 @@ def normalize_text(value):
     value = str(value).strip()
     value = re.sub(r"\s+", " ", value)
     return value
+
+
+def debug_log(message: str):
+    print(f"[DEBUG] {message}")
 
 
 # =========================================================
@@ -81,7 +85,7 @@ def clean_filters(filters: dict) -> dict:
 
 def build_search_query(canonical_product: dict) -> str:
     parts = []
-
+    print(f"Building search query from canonical product: {canonical_product}")
     brand = normalize_text(canonical_product.get("brand", ""))
     product_type = normalize_text(canonical_product.get("product_type", ""))
     model = normalize_text(canonical_product.get("model", ""))
@@ -119,21 +123,21 @@ def build_search_query(canonical_product: dict) -> str:
     if gender and gender.lower() not in ["unisex", "other"]:
         parts.append(gender)
 
-    # Only one size/capacity field, first match wins by priority
-    if storage:
-        parts.append(storage)
-    elif shoe_size:
-        parts.append(shoe_size)
-    elif weight:
-        parts.append(weight)
-    elif pack_size:
-        parts.append(pack_size)
-    elif size:
-        parts.append(size)
-    elif flavor:
-        parts.append(flavor)
-    elif quantity:
-        parts.append(quantity)
+    # Include identifying attributes
+    if storage: parts.append(storage)
+    if shoe_size: parts.append(shoe_size)
+    if weight: parts.append(weight)
+    if pack_size: parts.append(pack_size)
+    if size: parts.append(size)
+    if flavor: parts.append(flavor)
+    if quantity: parts.append(quantity)
+    
+    # Add category-specific identifiers
+    color = normalize_text(canonical_product.get("color", ""))
+    if color: parts.append(color)
+    
+    material = normalize_text(canonical_product.get("material", ""))
+    if material: parts.append(material)
 
     seen = set()
     final_parts = []
@@ -176,26 +180,28 @@ def sanitize_query(query: str) -> str:
 # AI CHAT - for greetings and general conversation
 # =========================================================
 
-CHAT_SYSTEM_PROMPT = """You are a friendly AI shopping assistant for an Indian e-commerce price comparison tool.
-You help users compare prices on Amazon.in and Flipkart and find the best deals.
-Respond naturally like a real helpful person. Never use scripted phrases. Vary your language every time.
-Keep responses to 1-2 sentences max. Do not return JSON. Just reply naturally.
-Always end by inviting the user to tell you what they want to shop for."""
+# CHAT_SYSTEM_PROMPT = """You are a friendly AI shopping assistant for an Indian e-commerce price comparison tool.
+# You help users compare prices on Amazon.in and Flipkart and find the best deals.
+# Respond naturally like a real helpful person. Never use scripted phrases. Vary your language every time.
+# Keep responses to 1-2 sentences max. Do not return JSON. Just reply naturally.
+# Always end by inviting the user to tell you what they want to shop for."""
 
 
-def get_chat_reply(user_text: str) -> str:
-    try:
-        response = provider.generate(
-            system_prompt=CHAT_SYSTEM_PROMPT,
-            user_input=user_text,
-            temperature=0.9,
-            max_tokens=100,
-        )
-        return response.strip()
+# def get_chat_reply(user_text: str) -> str:
+#     try:
+#         response = provider.generate(
+#             system_prompt=CHAT_SYSTEM_PROMPT,
+#             user_input=user_text,
+#             temperature=0.9,
+#             max_tokens=300,
+#         )
+#         print("\n===== CHAT RESPONSE =====")
+#         print(response)
+#         return response.strip()
 
-    except Exception as e:
-        print(f"CHAT REPLY ERROR: {e}")
-        return ""
+#     except Exception as e:
+#         print(f"CHAT REPLY ERROR: {e}")
+#         return ""
 
 
 # =========================================================
@@ -203,25 +209,29 @@ def get_chat_reply(user_text: str) -> str:
 # =========================================================
 
 def get_intent(full_query: str) -> dict:
+    # print(f"FULL QUERY:\n{full_query}\n{'-'*40}")
     last_line = full_query.strip().split("\n")[-1]
     if last_line.startswith("Latest User Input:"):
         last_line = last_line.replace("Latest User Input:", "").strip()
 
     if is_greeting(last_line):
-        print(f"GREETING DETECTED: '{last_line}'")
-        reply = get_chat_reply(last_line)
-        return {
-            "status": "chat",
-            "message": reply,
-        }
+        debug_log(f"GREETING DETECTED: '{last_line}'")
 
+        full_query = f"USER QUERY:\nLatest User Input:\n{last_line}"
     try:
+        print("\n===== SHOPPING SYSTEM PROMPT =====")
+        # print(SYSTEM_PROMPT)
+
+        print("\n===== SHOPPING USER INPUT =====")
+        print(f"USER QUERY:\n{full_query}")
         response = provider.generate(
             system_prompt=SYSTEM_PROMPT,
             user_input=f"USER QUERY:\n{full_query}",
             temperature=0.2,
-            max_tokens=500,
+            max_tokens=1000,
         )
+        print("\n===== RAW PROVIDER RESPONSE =====")
+        print(response)
 
         clean = response.strip()
         clean = clean.replace("```json", "").replace("```", "").strip()
@@ -240,22 +250,9 @@ def get_intent(full_query: str) -> dict:
         if response_type == "ready":
             canonical_product = data.get("canonical_product", {})
 
-            # Provider can return "ready" but still have a pending question — hold the search in that case
-            inline_clarification = data.get("clarification", "")
-            pref_question = data.get("preference_collection", "")
-            follow_up = inline_clarification or pref_question
+            
 
-            if follow_up and not data.get("search_query"):
-                print(f"PREFERENCE/CLARIFICATION STAGE — holding search: {follow_up}")
-                return {
-                    "status": "clarification",
-                    "search_mode": "assistant_mode",
-                    "question": data.get("question", follow_up),
-                    "missing_attributes": data.get("missing_required_attributes", []),
-                    "filters": clean_filters(data.get("filters", {})),
-                }
-
-            # Compound model names like "iPhone 15 or iPhone 15 Pro" — take the first option only
+            # Compound model' names like "iPhone 15 or iPhone 15 Pro" — take the first option only
             raw_model = canonical_product.get("model", "")
             if " or " in raw_model.lower():
                 first_model = raw_model.split(" or ")[0].strip()
@@ -365,14 +362,34 @@ def get_intent(full_query: str) -> dict:
                 "message": data.get("message", ""),
                 "filters": normalized_filters,
             }
-
-        elif response_type == "clarification":
+        elif response_type == "conversation":
             return {
-                "status": "clarification",
-                "search_mode": data.get("search_mode", "assistant_mode"),
-                "question": data.get("question", "Could you provide more details?"),
-                "missing_attributes": data.get("missing_required_attributes", []),
-                "options": data.get("options", []),
+                "status": "conversation",
+                "confidence": data.get("confidence", "medium"),
+                "assistant_message": data.get("message", ""),
+                "questions": data.get("questions", []),
+                "chips": data.get("chips", []),
+                "recommendations": data.get("recommendations", []),
+                "comparison": data.get("comparison"),
+                "product_line": data.get("product_line"),
+                "next_action": data.get("next_action", "conversation"),
+                "missing_required_attributes": data.get(
+                    "missing_required_attributes", []
+                ),
+                "cards": data.get("cards", []),
+            }
+        elif response_type == "chat":
+            return {
+                "status": "chat",
+                "message": data.get("message", ""),
+                "cards": data.get("cards", []),
+            }
+        elif response_type == "results":
+            return {
+                "status": "results",
+                "message": data.get("message", ""),
+                "products": data.get("products", []),
+                "follow_ups": data.get("follow_ups", []),
             }
 
         elif "message" in data or "response" in data:
