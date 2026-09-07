@@ -1,6 +1,7 @@
 import re                  # For pattern matching (extracting prices, numbers, codes from text)
 import random              # For adding random delays so we don't look like a bot
 import time                # For adding wait/sleep pauses between page actions
+import os
 from collections import Counter          # For counting frequency of values (used in price scanning)
 from playwright.sync_api import sync_playwright  # Playwright controls a real browser to scrape pages
 
@@ -918,20 +919,40 @@ def calc_discount(price, original_price):
 # SHARED BROWSER LAUNCHER
 # =========================================================
 
-def launch_browser(p):
-    # Launches a headless Chromium browser that looks like a real user's browser
-    # "headless" means no visible window — it runs in the background
-    browser = p.chromium.launch(
-        headless=True,
-        args=[
-            "--disable-blink-features=AutomationControlled",  # Hide the "controlled by automation" flag
-            "--no-sandbox", "--disable-setuid-sandbox",        # Required for running in containers
-            "--disable-infobars", "--disable-dev-shm-usage",  # Remove bot-detection hints
-            "--disable-extensions", "--window-size=1280,800",
-        ]
-    )
+def _scrapeops_proxy_config():
+    """Return the ScrapeOps proxy-port config without ever logging the key."""
+    api_key = os.getenv("SCRAPEOPS_API_KEY", "").strip()
+    enabled = os.getenv("SCRAPEOPS_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+    if not api_key or not enabled:
+        return None
+    return {
+        "server": "http://proxy.scrapeops.io:5353",
+        "username": "scrapeops.headless_browser_mode=true",
+        "password": api_key,
+    }
 
+
+def launch_browser(p):
+    # Launches a headless Chromium browser that looks like a real user's browser.
+    # When configured, every browser-based marketplace scraper uses ScrapeOps.
+    proxy = _scrapeops_proxy_config()
+    if proxy:
+        print("[ScrapeOps] Proxy enabled for marketplace browser")
+    launch_options = {
+        "headless": True,
+        "args": [
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox", "--disable-setuid-sandbox",
+            "--disable-infobars", "--disable-dev-shm-usage",
+            "--disable-extensions", "--window-size=1280,800",
+        ],
+    }
+    if proxy:
+        launch_options["proxy"] = proxy
+    browser = p.chromium.launch(**launch_options)
     context = browser.new_context(
+        ignore_https_errors=bool(proxy),
+
         user_agent=(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -960,6 +981,8 @@ def make_empty_result(store, query, message=None):
     base_url = (
         f"https://www.amazon.in/s?k={query.replace(' ', '+')}"
         if store == "Amazon"
+        else f"https://www.croma.com/searchB?q={query.replace(' ', '+')}"
+        if store == "Croma"
         else f"https://www.flipkart.com/search?q={query.replace(' ', '+')}"
     )
     return [{
@@ -1234,7 +1257,66 @@ def scrape_amazon(query, canonical_product, intent_type="main_product", debug_ti
 # FLIPKART SCRAPER
 # =========================================================
 
-def scrape_flipkart(query, canonical_product, intent_type="main_product", debug_titles=False):
+def scrape_croma(query, canonical_product, intent_type="main_product", debug_titles=False):
+    """Scrape Croma search cards into the shared product schema."""
+    query = sanitize_search_query(query)
+    products = []
+    with sync_playwright() as p:
+        browser, context = launch_browser(p)
+        page = context.new_page()
+        try:
+            page.goto("https://www.croma.com/searchB?q=" + query.replace(" ", "%20"), timeout=60000, wait_until="domcontentloaded")
+            page.wait_for_timeout(2500)
+
+            page_title = page.title().lower()
+            if any(word in page_title for word in ("captcha", "access denied", "blocked", "robot")):
+                print(f"CROMA BLOCKED: {page.title()}")
+                return make_empty_result("Croma", query, "Croma is temporarily blocking automated search.")
+
+            card_selectors = [
+                "li.product-item",
+                "li.product-item-wrapper",
+                "div.product-item",
+                "div[class*='product-item']",
+                "[data-testid*='product']",
+                "a[href*='/p/']",
+            ]
+            cards = []
+            for selector in card_selectors:
+                cards = page.query_selector_all(selector)
+                if cards:
+                    print(f"CROMA CARDS: {len(cards)} via {selector}")
+                    break
+
+            if not cards:
+                print(f"CROMA NO PRODUCT CARDS: title={page.title()} url={page.url}")
+                return make_empty_result("Croma", query, "No Croma product cards were available for this search.")
+            for card in cards[:25]:
+                text = card.inner_text().strip()
+                title_el = card.query_selector("h3, h2, a[title]")
+                title = ((title_el.get_attribute("title") if title_el else "") or (title_el.inner_text() if title_el else "")).strip()
+                price = parse_price(text)
+                if not title or not price or not validate_price(price, canonical_product):
+                    continue
+                score = calculate_match_score(title, canonical_product, store="Croma")
+                if score < get_minimum_score(canonical_product):
+                    continue
+                link_el = card.query_selector("a[href]")
+                href = link_el.get_attribute("href") if link_el else ""
+                products.append({"product_name": title, "price_inr": price, "original_price": 0,
+                    "discount_percent": 0, "store": "Croma", "delivery_days": 0, "delivery_label": "",
+                    "rating": 0, "review_count": 0, "offer": "", "stock_status": "In Stock",
+                    "is_reliable": True, "image": "", "product_link": href if href and href.startswith("http") else "https://www.croma.com" + (href or ""),
+                    "match_score": score, "is_best_price": False})
+        except Exception as error:
+            print(f"CROMA SCRAPE ERROR: {error}")
+        finally:
+            context.close()
+            browser.close()
+    return finalize_products(products, "Croma", query)
+
+
+def scrape_flipkart_playwright(query, canonical_product, intent_type="main_product", debug_titles=False):
     # Same structure as scrape_amazon, but adapted for Flipkart's HTML layout
     query = sanitize_search_query(query)
     min_score = get_minimum_score(canonical_product)
@@ -1406,3 +1488,172 @@ def scrape_flipkart(query, canonical_product, intent_type="main_product", debug_
 
     print(f"\nFinal Flipkart count: {len(products)}")
     return finalize_products(products, "Flipkart", query)
+
+
+def scrape_flipkart(query, canonical_product, intent_type="main_product", debug_titles=False):
+    """Scrape Flipkart with Playwright using the shared ScrapeOps launcher."""
+    return scrape_flipkart_playwright(query, canonical_product, intent_type, debug_titles)
+
+
+# =========================================================
+# RELIANCE DIGITAL SCRAPER
+# =========================================================
+
+def scrape_reliance(query, canonical_product, intent_type="main_product", debug_titles=False):
+    """Scrape Reliance Digital search results into the shared product schema."""
+    query = sanitize_search_query(query)
+    products = []
+    with sync_playwright() as p:
+        browser, context = launch_browser(p)
+        page = context.new_page()
+        try:
+            url = "https://www.reliancedigital.in/search?q=" + query.replace(" ", "+")
+            page.goto(url, timeout=60000, wait_until="domcontentloaded")
+            page.wait_for_timeout(3000)
+
+            page_title = page.title().lower()
+            if any(word in page_title for word in ("captcha", "access denied", "blocked", "robot", "attention required")):
+                print(f"RELIANCE BLOCKED: {page.title()}")
+                return make_empty_result("Reliance Digital", query, "Reliance Digital is temporarily blocking automated search.")
+
+            # Reliance Digital uses React-rendered product cards
+            card_selectors = [
+                "div.pdp-card",
+                "div[class*='productCard']",
+                "div[class*='pdp-card']",
+                "div[class*='prod-card']",
+                "li[class*='product']",
+                "[class*='productCardWrap']",
+                "div.product-card",
+            ]
+            cards = []
+            for selector in card_selectors:
+                cards = page.query_selector_all(selector)
+                if cards:
+                    print(f"RELIANCE CARDS: {len(cards)} via {selector}")
+                    break
+
+            if not cards:
+                # Try a broader approach: any link that looks like a product page
+                fallback_links = page.query_selector_all("a[href*='/p/'], a[href*='/buy/']")
+                if fallback_links:
+                    cards = [el for el in fallback_links if el.query_selector("h3, h4, span, p")]
+                    print(f"RELIANCE FALLBACK CARDS: {len(cards)} via product links")
+
+            if not cards:
+                print(f"RELIANCE NO PRODUCT CARDS: title={page.title()} url={page.url}")
+                return make_empty_result("Reliance Digital", query, "No Reliance Digital product cards were available for this search.")
+
+            for card in cards[:25]:
+                text = card.inner_text().strip()
+                title_el = card.query_selector("h3, h4, [class*='title'], a[title]")
+                title = ""
+                if title_el:
+                    title = (title_el.get_attribute("title") or "").strip() or title_el.inner_text().strip()
+                price = parse_price(text)
+                if not title or not price or not validate_price(price, canonical_product):
+                    continue
+                score = calculate_match_score(title, canonical_product, store="Reliance Digital")
+                if score < get_minimum_score(canonical_product):
+                    continue
+                link_el = card.query_selector("a[href]")
+                href = link_el.get_attribute("href") if link_el else ""
+                # Extract rating if available
+                rating_el = card.query_selector("[class*='rating'], [class*='stars'], span[class*='star']")
+                rating = 0.0
+                if rating_el:
+                    rating_text = rating_el.inner_text().strip()
+                    rating = parse_price(rating_text) if rating_text else 0.0
+                products.append({"product_name": title, "price_inr": price, "original_price": 0,
+                    "discount_percent": 0, "store": "Reliance Digital", "delivery_days": 0, "delivery_label": "",
+                    "rating": rating, "review_count": 0, "offer": "", "stock_status": "In Stock",
+                    "is_reliable": True, "image": "", "product_link": href if href and href.startswith("http") else "https://www.reliancedigital.in" + (href or ""),
+                    "match_score": score, "is_best_price": False})
+        except Exception as error:
+            print(f"RELIANCE SCRAPE ERROR: {error}")
+        finally:
+            context.close()
+            browser.close()
+    return finalize_products(products, "Reliance Digital", query)
+
+
+# =========================================================
+# TATA CLiQ SCRAPER
+# =========================================================
+
+def scrape_tatacliq(query, canonical_product, intent_type="main_product", debug_titles=False):
+    """Scrape Tata CLiQ search results into the shared product schema."""
+    query = sanitize_search_query(query)
+    products = []
+    with sync_playwright() as p:
+        browser, context = launch_browser(p)
+        page = context.new_page()
+        try:
+            url = "https://www.tatacliq.com/search?q=" + query.replace(" ", "+")
+            page.goto(url, timeout=60000, wait_until="domcontentloaded")
+            page.wait_for_timeout(3000)
+
+            page_title = page.title().lower()
+            if any(word in page_title for word in ("captcha", "access denied", "blocked", "robot", "attention required")):
+                print(f"TATACLIQ BLOCKED: {page.title()}")
+                return make_empty_result("Tata CLiQ", query, "Tata CLiQ is temporarily blocking automated search.")
+
+            # Tata CLiQ product card selectors
+            card_selectors = [
+                "div.product-card",
+                "div[class*='ProductCard']",
+                "div[class*='productCard']",
+                "li.product-card",
+                "div[class*='product_tile']",
+                "[data-testid*='productCard']",
+                "a[class*='product']",
+            ]
+            cards = []
+            for selector in card_selectors:
+                cards = page.query_selector_all(selector)
+                if cards:
+                    print(f"TATACLIQ CARDS: {len(cards)} via {selector}")
+                    break
+
+            if not cards:
+                # Fallback: search for product listing links
+                fallback_links = page.query_selector_all("a[href*='/product-detail/'], a[href*='/pd/']")
+                if fallback_links:
+                    cards = [el for el in fallback_links if el.query_selector("h3, h4, span, p, img")]
+                    print(f"TATACLIQ FALLBACK CARDS: {len(cards)} via product links")
+
+            if not cards:
+                print(f"TATACLIQ NO PRODUCT CARDS: title={page.title()} url={page.url}")
+                return make_empty_result("Tata CLiQ", query, "No Tata CLiQ product cards were available for this search.")
+
+            for card in cards[:25]:
+                text = card.inner_text().strip()
+                title_el = card.query_selector("h3, h4, [class*='title'], [class*='name'], a[title]")
+                title = ""
+                if title_el:
+                    title = (title_el.get_attribute("title") or "").strip() or title_el.inner_text().strip()
+                price = parse_price(text)
+                if not title or not price or not validate_price(price, canonical_product):
+                    continue
+                score = calculate_match_score(title, canonical_product, store="Tata CLiQ")
+                if score < get_minimum_score(canonical_product):
+                    continue
+                link_el = card.query_selector("a[href]")
+                href = link_el.get_attribute("href") if link_el else ""
+                # Extract rating
+                rating_el = card.query_selector("[class*='rating'], [class*='stars'], [class*='Rating']")
+                rating = 0.0
+                if rating_el:
+                    rating_text = rating_el.inner_text().strip()
+                    rating = parse_price(rating_text) if rating_text else 0.0
+                products.append({"product_name": title, "price_inr": price, "original_price": 0,
+                    "discount_percent": 0, "store": "Tata CLiQ", "delivery_days": 0, "delivery_label": "",
+                    "rating": rating, "review_count": 0, "offer": "", "stock_status": "In Stock",
+                    "is_reliable": True, "image": "", "product_link": href if href and href.startswith("http") else "https://www.tatacliq.com" + (href or ""),
+                    "match_score": score, "is_best_price": False})
+        except Exception as error:
+            print(f"TATACLIQ SCRAPE ERROR: {error}")
+        finally:
+            context.close()
+            browser.close()
+    return finalize_products(products, "Tata CLiQ", query)
