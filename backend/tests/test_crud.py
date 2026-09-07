@@ -1,4 +1,4 @@
-from crud import save_message, get_history
+from app.database.crud import get_history, save_message
 
 session_id = "test_session_002"
 

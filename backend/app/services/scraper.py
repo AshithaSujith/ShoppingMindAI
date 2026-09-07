@@ -1,8 +1,26 @@
 import re                  # For pattern matching (extracting prices, numbers, codes from text)
 import random              # For adding random delays so we don't look like a bot
 import time                # For adding wait/sleep pauses between page actions
+import os
+import shutil
 from collections import Counter          # For counting frequency of values (used in price scanning)
 from playwright.sync_api import sync_playwright  # Playwright controls a real browser to scrape pages
+from bs4 import BeautifulSoup
+
+from app.services.zenrows import fetch_html
+
+
+# Keep the synchronous marketplace work within the frontend's scrape timeout.
+# A blocked retailer should fail quickly so the remaining stores can still
+# return their results. Increased to 60s to handle network delays.
+SCRAPER_NAVIGATION_TIMEOUT_MS = min(
+    int(os.getenv("SCRAPER_NAVIGATION_TIMEOUT_MS", "12000")),
+    15000,
+)
+SCRAPER_SELECTOR_TIMEOUT_MS = min(
+    int(os.getenv("SCRAPER_SELECTOR_TIMEOUT_MS", "5000")),
+    7000,
+)
 
 
 # =========================================================
@@ -148,6 +166,31 @@ def is_product_code(model: str) -> bool:
             and bool(re.search(r'\d', tok)))       # Contains at least one digit
 
 
+def get_category_evidence(canonical_product: dict) -> set[str]:
+    """Return model-supplied category evidence without a fixed synonym list.
+
+    The intent model may provide ``category_terms`` for retailer vocabulary
+    (for example, terms commonly used for the requested category). If absent,
+    category matching remains a soft signal rather than rejecting every valid
+    listing whose title omits the generic category word.
+    """
+    raw = canonical_product.get("category_terms", [])
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    if not isinstance(raw, (list, tuple, set)):
+        return set()
+    return {normalize_text(term) for term in raw if normalize_text(term)}
+
+
+def get_product_evidence(canonical_product: dict) -> set[str]:
+    """Return dynamic product/category phrases from the intent response."""
+    values = []
+    for key in ("product", "product_name", "category_terms"):
+        value = canonical_product.get(key, [])
+        values.extend(value if isinstance(value, (list, tuple, set)) else [value])
+    return {normalize_text(value) for value in values if normalize_text(value)}
+
+
 # =========================================================
 # PRICE BOUNDS BY CATEGORY
 # =========================================================
@@ -213,13 +256,24 @@ def get_price_bounds(canonical_product: dict):
 
 
 def validate_price(price: float, canonical_product: dict) -> bool:
-    # Returns True if the price falls within the expected range for this product type
+    """Validate category bounds and the user's explicit maximum budget."""
     if price <= 0:
-        return False   # Zero or negative price is always invalid
-    min_p, max_p = get_price_bounds(canonical_product)
-    if price < min_p or price > max_p:
-        print(f"    [PRICE REJECT] Rs.{price} outside bounds Rs.{min_p}-Rs.{max_p}")
         return False
+
+    min_p, category_max = get_price_bounds(canonical_product)
+    if price < min_p or price > category_max:
+        print(f"    [PRICE REJECT] Rs.{price} outside bounds Rs.{min_p}-Rs.{category_max}")
+        return False
+
+    requested_max = canonical_product.get("max_price")
+    if requested_max is not None:
+        numbers = re.findall(r"\d+(?:\.\d+)?", str(requested_max).replace(",", ""))
+        if numbers:
+            budget_max = max(float(number) for number in numbers)
+            if price > budget_max:
+                print(f"    [BUDGET REJECT] Rs.{price} exceeds requested maximum Rs.{budget_max}")
+                return False
+
     return True
 
 
@@ -392,7 +446,18 @@ def hard_filter(title: str, canonical_product: dict, store: str = "Amazon") -> b
 
         if distinctive:
             # All distinctive words must appear in the title
-            missing = [tok for tok in distinctive if tok not in tokens]
+            category_terms = get_category_evidence(canonical_product)
+            evidence_present = any(
+                set(term.split()).issubset(tokens) for term in category_terms
+            )
+            # Do not maintain a hardcoded synonym dictionary. If the intent
+            # model supplied dynamic category evidence, enforce it; otherwise
+            # leave category wording as a soft signal and rely on brand/model,
+            # variant, price, and marketplace relevance checks.
+            missing = [
+                tok for tok in distinctive
+                if tok not in tokens and not evidence_present
+            ]
             if missing:
                 print(f"    [HARD FILTER] Product name mismatch (missing {missing}): '{title[:60]}'")
                 return False
@@ -569,6 +634,11 @@ def calculate_match_score(title: str, canonical_product: dict, store: str = "Ama
     score = 0
     t = normalize_text(title)
     tokens = set(t.split())
+    evidence = get_product_evidence(canonical_product)
+    if evidence:
+        matches = [term for term in evidence if set(term.split()).issubset(tokens)]
+        if matches:
+            score += min(60, max(25, max(len(term.split()) for term in matches) * 20))
 
     # +60 points if product type matches (e.g. "smartphone", "shoes")
     product_type = normalize_text(canonical_product.get("product_type", ""))
@@ -674,15 +744,17 @@ def get_minimum_score(canonical_product: dict) -> int:
 # =========================================================
 
 def remove_duplicates(products):
-    # Removes products with identical normalized titles
-    # Keeps the first occurrence (which is already sorted by score)
+    """Remove true duplicates without collapsing different store offers."""
     unique = []
     seen = set()
-    for p in products:
-        key = normalize_text(p["product_name"])
+    for product in products:
+        title = normalize_text(product.get("product_name", ""))
+        store = normalize_text(product.get("store", ""))
+        link = normalize_text(product.get("product_link", ""))
+        key = (store, link or title)
         if key not in seen:
             seen.add(key)
-            unique.append(p)
+            unique.append(product)
     return unique
 
 
@@ -918,20 +990,83 @@ def calc_discount(price, original_price):
 # SHARED BROWSER LAUNCHER
 # =========================================================
 
-def launch_browser(p):
-    # Launches a headless Chromium browser that looks like a real user's browser
-    # "headless" means no visible window — it runs in the background
-    browser = p.chromium.launch(
-        headless=True,
-        args=[
-            "--disable-blink-features=AutomationControlled",  # Hide the "controlled by automation" flag
-            "--no-sandbox", "--disable-setuid-sandbox",        # Required for running in containers
-            "--disable-infobars", "--disable-dev-shm-usage",  # Remove bot-detection hints
-            "--disable-extensions", "--window-size=1280,800",
-        ]
-    )
+def _scrapeops_proxy_config():
+    """Return the ScrapeOps proxy-port config without ever logging the key."""
+    api_key = os.getenv("SCRAPEOPS_API_KEY", "").strip()
+    enabled = os.getenv("SCRAPEOPS_ENABLED", "false").strip().lower() not in {"0", "false", "no", "off"}
+    if not api_key or not enabled:
+        return None
 
+    # Set SCRAPEOPS_COUNTRY=in when the account includes India-targeted routing.
+    # It remains opt-in because geo routing is plan-dependent.
+    country = os.getenv("SCRAPEOPS_COUNTRY", "").strip().lower()
+    username = "scrapeops.headless_browser_mode=true"
+    if country:
+        username = f"{username}.country={country}"
+    return {
+        "server": "http://proxy.scrapeops.io:5353",
+        "username": username,
+        "password": api_key,
+    }
+
+
+def launch_browser(p):
+    # Launches a headless Chromium browser that looks like a real user's browser.
+    # When configured, every browser-based marketplace scraper uses ScrapeOps.
+    proxy = _scrapeops_proxy_config()
+    if proxy:
+        print("[ScrapeOps] Proxy enabled for marketplace browser")
+    launch_options = {
+        "headless": True,
+        "args": [
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox", "--disable-setuid-sandbox",
+            "--disable-infobars", "--disable-dev-shm-usage",
+            "--disable-extensions", "--window-size=1280,800",
+        ],
+    }
+    # Playwright's Python package does not install a browser binary. In many
+    # deployments the package is present but Chromium was never installed,
+    # which makes every marketplace return [] before extraction starts. Allow
+    # an explicit executable path and fall back to common system browsers.
+    executable_path = os.getenv("PLAYWRIGHT_EXECUTABLE_PATH", "").strip()
+    if not executable_path:
+        executable_path = next(
+            (
+                path
+                for command in (
+                    "chromium",
+                    "chromium-browser",
+                    "google-chrome",
+                    "google-chrome-stable",
+                )
+                if (path := shutil.which(command))
+            ),
+            "",
+        )
+    if executable_path:
+        if not os.path.isfile(executable_path) or not os.access(executable_path, os.X_OK):
+            raise RuntimeError(
+                "PLAYWRIGHT_EXECUTABLE_PATH is not an executable file: "
+                f"{executable_path}"
+            )
+        launch_options["executable_path"] = executable_path
+    if proxy:
+        launch_options["proxy"] = proxy
+    try:
+        browser = p.chromium.launch(**launch_options)
+    except Exception as exc:
+        message = str(exc)
+        if "Executable doesn't exist" in message or "browser" in message.lower():
+            raise RuntimeError(
+                "Playwright browser is unavailable. Run 'python -m playwright "
+                "install chromium' during deployment, or set "
+                "PLAYWRIGHT_EXECUTABLE_PATH to an installed Chromium/Chrome binary."
+            ) from exc
+        raise
     context = browser.new_context(
+        ignore_https_errors=bool(proxy),
+
         user_agent=(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -955,22 +1090,93 @@ def launch_browser(p):
 
 
 def make_empty_result(store, query, message=None):
-    # Creates a placeholder "no results" product when scraping finds nothing
-    # Links directly to the search page so the user can check manually
-    base_url = (
-        f"https://www.amazon.in/s?k={query.replace(' ', '+')}"
-        if store == "Amazon"
-        else f"https://www.flipkart.com/search?q={query.replace(' ', '+')}"
-    )
-    return [{
-        "product_name": message or f"No products found for '{query}'",
-        "price_inr": 0, "original_price": 0, "discount_percent": 0,
-        "store": store, "delivery_days": 0, "delivery_label": "",
-        "rating": 0, "review_count": 0, "offer": "",
-        "stock_status": "Unknown", "is_reliable": False,
-        "image": "", "product_link": base_url,
-        "match_score": 0, "is_best_price": False,
-    }]
+    """Return no products for blocked, unavailable, or empty marketplace pages."""
+    if message:
+        print(f"{store} unavailable for '{query}': {message}")
+    return []
+
+
+def _zenrows_products(url, canonical_product, store, query):
+    """Extract a conservative product list from ZenRows-rendered HTML.
+
+    This is intentionally a fallback, not a replacement for marketplace
+    parsers: it only accepts product-like links containing a price and applies
+    the same price/match/reliability checks as browser scraping.
+    """
+    html = fetch_html(url)
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    products = []
+    seen = set()
+    href_markers = {
+        "Amazon": ("/dp/", "/gp/product/"),
+        "Flipkart": ("/p/",),
+        "Croma": ("/p/",),
+        "Reliance Digital": ("/p/", "/buy/"),
+        "Tata CLiQ": ("/product-detail/", "/pd/"),
+    }.get(store, ())
+
+    for link in soup.select("a[href]"):
+        href = link.get("href", "").strip()
+        if not href or href.startswith("#") or not any(marker in href for marker in href_markers):
+            continue
+        card = link.find_parent(["article", "li", "div"])
+        text = " ".join((card or link).get_text(" ", strip=True).split())
+        if len(text) < 20 or len(text) > 1200:
+            continue
+        title = (link.get("title") or link.get("aria-label") or link.get_text(" ", strip=True)).strip()
+        if len(title) < 8 or len(title) > 300:
+            continue
+        # Prefer an explicitly currency-marked value. A generic parse of the
+        # full card can otherwise mistake model numbers such as "S24" for the
+        # product price.
+        currency_match = re.findall(
+            r"(?:₹|rs\.?|inr)\s*([\d,]+(?:\.\d+)?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        price = parse_price(currency_match[-1]) if currency_match else 0
+        if not price:
+            price = parse_price(text)
+        if not price or not validate_price(price, canonical_product):
+            continue
+        score = calculate_match_score(title, canonical_product, store=store)
+        if score < get_minimum_score(canonical_product):
+            continue
+        absolute = href if href.startswith("http") else {
+            "Amazon": "https://www.amazon.in",
+            "Flipkart": "https://www.flipkart.com",
+            "Croma": "https://www.croma.com",
+            "Reliance Digital": "https://www.reliancedigital.in",
+            "Tata CLiQ": "https://www.tatacliq.com",
+        }.get(store, "") + href
+        key = (title.casefold(), absolute)
+        if key in seen:
+            continue
+        seen.add(key)
+        products.append({
+            "product_name": title,
+            "price_inr": price,
+            "original_price": 0,
+            "discount_percent": 0,
+            "store": store,
+            "delivery_days": 0,
+            "delivery_label": "",
+            "rating": 0,
+            "review_count": 0,
+            "offer": "",
+            "stock_status": "In Stock",
+            "is_reliable": True,
+            "image": "",
+            "product_link": absolute,
+            "match_score": score,
+            "is_best_price": False,
+        })
+        if len(products) >= 10:
+            break
+    return finalize_products(products, store, query)
 
 
 def finalize_products(products, store, query):
@@ -989,14 +1195,79 @@ def finalize_products(products, store, query):
 
 
 def scrape_with_fallback(scrape_fn, query, canonical_product, intent_type):
-    # Wrapper that tries up to 4 different query strategies before giving up
-    # This ensures we return SOMETHING even when the ideal search fails
+    # Wrapper that tries up to 4 different query strategies before giving up.
+    # If ScrapeOps is enabled but blocks or times out for a retailer, retry once
+    # without the proxy so the site can still be scraped directly.
+    last_attempt_failed = False
+    proxy_enabled = _scrapeops_proxy_config() is not None
+
+    def _has_real_results(results):
+        return any(p.get("is_reliable") and p.get("price_inr", 0) > 0 for p in results)
+
+    def _store_name():
+        names = {
+            "scrape_amazon": "Amazon",
+            "scrape_flipkart": "Flipkart",
+            "scrape_croma": "Croma",
+            "scrape_reliance": "Reliance Digital",
+            "scrape_tatacliq": "Tata CLiQ",
+        }
+        return names.get(scrape_fn.__name__, "Marketplace")
+
+    def _run_scraper(search_query, product):
+        """Keep a navigation or browser failure isolated to its marketplace."""
+        nonlocal last_attempt_failed
+        try:
+            result = scrape_fn(search_query, product, intent_type)
+            last_attempt_failed = False
+            return result
+        except Exception as error:
+            last_attempt_failed = True
+            store = _store_name()
+            print(f"{store} SCRAPE ERROR: {error}")
+            return make_empty_result(
+                store,
+                search_query,
+                f"{store} is temporarily unavailable. Please try again.",
+            )
+
+    def _retry_without_proxy():
+        # Do not mutate process-wide environment state. A direct retry can race
+        # with other marketplace requests and silently disable ScrapeOps.
+        return None
 
     # ── Pass 1: Try the original query ──────────────────────────────────
-    results = scrape_fn(query, canonical_product, intent_type)
+    results = _run_scraper(query, canonical_product)
+    initial_attempt_failed = last_attempt_failed
     real = [p for p in results if p.get("is_reliable") and p.get("price_inr", 0) > 0]
     if real:
         return results   # Found reliable results — done
+
+    if proxy_enabled:
+        print("  [FALLBACK PROXY] ScrapeOps returned no reliable results; keeping proxy state unchanged.")
+
+    # ScrapeOps can be active but still reject/timeout certain sites. Retry once
+    # with the proxy disabled so direct browser scraping can still succeed.
+    proxy_retry = _retry_without_proxy()
+    if proxy_retry is not None:
+        proxy_real = [p for p in proxy_retry if p.get("is_reliable") and p.get("price_inr", 0) > 0]
+        if proxy_real:
+            return proxy_retry
+        # The same retailer has now been attempted through both the configured
+        # proxy and a direct connection. More query variants cannot fix an
+        # access/block page and only make the API request time out.
+        return proxy_retry
+
+    # With a configured proxy, one normal query is enough for a marketplace.
+    # Query variations against an empty/block response multiply request time
+    # without improving the chance of a usable result.
+    if proxy_enabled:
+        return results
+
+    # A direct navigation failure is not a product-match failure. Retrying the
+    # same unavailable retailer with looser queries only delays the response.
+    if initial_attempt_failed:
+        return results
 
     # ── Pass 2: Try a shorter/simpler query (brand + model only) ────────
     brand   = canonical_product.get("brand", "")
@@ -1015,25 +1286,31 @@ def scrape_with_fallback(scrape_fn, query, canonical_product, intent_type):
 
     if short_query != query and len(short_query) >= 5:
         print(f"  [FALLBACK P2] Retrying with shorter query: '{short_query}'")
-        results2 = scrape_fn(short_query, canonical_product, intent_type)
+        results2 = _run_scraper(short_query, canonical_product)
         real2 = [p for p in results2 if p.get("is_reliable") and p.get("price_inr", 0) > 0]
         if real2:
             return results2
 
     # ── Pass 3: Remove the brand filter and search more broadly ─────────
     print(f"  [FALLBACK P3] Retrying without brand filter...")
-    relaxed = dict(canonical_product)     # Copy canonical product
-    relaxed.pop("brand", None)            # Remove brand so hard_filter doesn't reject brand mismatches
-    results3 = scrape_fn(query, relaxed, intent_type)
-    real3 = [p for p in results3 if p.get("is_reliable") and p.get("price_inr", 0) > 0]
+
+    relaxed = dict(canonical_product)
+    relaxed.pop("brand", None)
+
+    results3 = _run_scraper(query, relaxed)
+
+    real3 = [
+        p for p in results3
+        if p.get("is_reliable") and p.get("price_inr", 0) > 0
+    ]
+
     if real3:
         for p in real3:
-            # Add a note so the frontend knows this is a similar product, not exact
             p["offer"] = p.get("offer", "") or "Similar product shown"
-        return results3
+        return real3
 
     # ── Pass 4: Try with just model + product type, minimal filters ──────
-    if not [p for p in results3 if p.get("is_reliable") and p.get("price_inr", 0) > 0]:
+    if not _has_real_results(results3):
         model = canonical_product.get("model", "")
         pt = canonical_product.get("product_type", "")
         if model and pt:
@@ -1046,7 +1323,7 @@ def scrape_with_fallback(scrape_fn, query, canonical_product, intent_type):
                 k: v for k, v in canonical_product.items()
                 if k in ("brand", "model", "product_type", "storage", "storage_capacity")
             }
-            results4 = scrape_fn(generic_query, generic_canon, intent_type)
+            results4 = _run_scraper(generic_query, generic_canon)
             real4 = [p for p in results4 if p.get("is_reliable") and p.get("price_inr", 0) > 0]
             if real4:
                 return results4
@@ -1076,7 +1353,14 @@ def scrape_amazon(query, canonical_product, intent_type="main_product", debug_ti
         # Build the Amazon search URL and navigate to it
         url = "https://www.amazon.in/s?k=" + query.replace(" ", "+")
         print(f"URL: {url}\n")
-        page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        try:
+            page.goto(url, timeout=SCRAPER_NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
+        except Exception as error:
+            print(f"AMAZON PLAYWRIGHT NAVIGATION ERROR: {type(error).__name__}")
+            fallback = _zenrows_products(url, canonical_product, "Amazon", query)
+            context.close()
+            browser.close()
+            return fallback
 
         # Scroll down and back to trigger lazy-loaded content (like images and prices)
         page.evaluate("window.scrollTo(0, 400)")
@@ -1086,11 +1370,11 @@ def scrape_amazon(query, canonical_product, intent_type="main_product", debug_ti
 
         # Wait for product cards to appear on the page
         try:
-            page.wait_for_selector('[data-component-type="s-search-result"]', timeout=20000)
+            page.wait_for_selector('[data-component-type="s-search-result"]', timeout=SCRAPER_SELECTOR_TIMEOUT_MS)
         except Exception:
             print("WARNING: Primary selector timed out, trying fallback")
             try:
-                page.wait_for_selector('div[data-asin]:not([data-asin=""])', timeout=8000)
+                page.wait_for_selector('div[data-asin]:not([data-asin=""])', timeout=SCRAPER_SELECTOR_TIMEOUT_MS)
             except Exception:
                 print("WARNING: Both selectors timed out")
 
@@ -1137,8 +1421,16 @@ def scrape_amazon(query, canonical_product, intent_type="main_product", debug_ti
                     print("  SKIP: no title")
                     continue
 
-                # Calculate how well this title matches what the user wants
-                score = calculate_match_score(title, canonical_product, store="Amazon")
+                # Amazon occasionally omits the brand prefix in the visible
+                # title while the listing still matches the requested brand.
+                # Include the confirmed brand for scoring only; preserve the
+                # original extracted title in the returned product.
+                scoring_title = title
+                requested_brand = str(canonical_product.get("brand", "")).strip()
+                if requested_brand and normalize_text(requested_brand) not in normalize_text(title):
+                    scoring_title = f"{requested_brand} {title}"
+
+                score = calculate_match_score(scoring_title, canonical_product, store="Amazon")
                 print(f"  {'OK' if score >= min_score else 'NO'} score={score:3d} | {title[:70]}")
                 if score < min_score:
                     continue   # Score too low — skip this product
@@ -1234,7 +1526,67 @@ def scrape_amazon(query, canonical_product, intent_type="main_product", debug_ti
 # FLIPKART SCRAPER
 # =========================================================
 
-def scrape_flipkart(query, canonical_product, intent_type="main_product", debug_titles=False):
+def scrape_croma(query, canonical_product, intent_type="main_product", debug_titles=False):
+    """Scrape Croma search cards into the shared product schema."""
+    query = sanitize_search_query(query)
+    products = []
+    with sync_playwright() as p:
+        browser, context = launch_browser(p)
+        page = context.new_page()
+        try:
+            page.goto("https://www.croma.com/searchB?q=" + query.replace(" ", "%20"), timeout=SCRAPER_NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
+            page.wait_for_timeout(2500)
+
+            page_title = page.title().lower()
+            if any(word in page_title for word in ("captcha", "access denied", "blocked", "robot")):
+                print(f"CROMA BLOCKED: {page.title()}")
+                return make_empty_result("Croma", query, "Croma is temporarily blocking automated search.")
+
+            card_selectors = [
+                "li.product-item",
+                "li.product-item-wrapper",
+                "div.product-item",
+                "div[class*='product-item']",
+                "[data-testid*='product']",
+                "a[href*='/p/']",
+            ]
+            cards = []
+            for selector in card_selectors:
+                cards = page.query_selector_all(selector)
+                if cards:
+                    print(f"CROMA CARDS: {len(cards)} via {selector}")
+                    break
+
+            if not cards:
+                print(f"CROMA NO PRODUCT CARDS: title={page.title()} url={page.url}")
+                fallback = _zenrows_products(page.url, canonical_product, "Croma", query)
+                return fallback or make_empty_result("Croma", query, "No Croma product cards were available for this search.")
+            for card in cards[:25]:
+                text = card.inner_text().strip()
+                title_el = card.query_selector("h3, h2, a[title]")
+                title = ((title_el.get_attribute("title") if title_el else "") or (title_el.inner_text() if title_el else "")).strip()
+                price = parse_price(text)
+                if not title or not price or not validate_price(price, canonical_product):
+                    continue
+                score = calculate_match_score(title, canonical_product, store="Croma")
+                if score < get_minimum_score(canonical_product):
+                    continue
+                link_el = card.query_selector("a[href]")
+                href = link_el.get_attribute("href") if link_el else ""
+                products.append({"product_name": title, "price_inr": price, "original_price": 0,
+                    "discount_percent": 0, "store": "Croma", "delivery_days": 0, "delivery_label": "",
+                    "rating": 0, "review_count": 0, "offer": "", "stock_status": "In Stock",
+                    "is_reliable": True, "image": "", "product_link": href if href and href.startswith("http") else "https://www.croma.com" + (href or ""),
+                    "match_score": score, "is_best_price": False})
+        except Exception as error:
+            print(f"CROMA SCRAPE ERROR: {error}")
+        finally:
+            context.close()
+            browser.close()
+    return finalize_products(products, "Croma", query)
+
+
+def scrape_flipkart_playwright(query, canonical_product, intent_type="main_product", debug_titles=False):
     # Same structure as scrape_amazon, but adapted for Flipkart's HTML layout
     query = sanitize_search_query(query)
     min_score = get_minimum_score(canonical_product)
@@ -1250,11 +1602,11 @@ def scrape_flipkart(query, canonical_product, intent_type="main_product", debug_
 
         url = "https://www.flipkart.com/search?q=" + query.replace(" ", "+")
         print(f"URL: {url}\n")
-        page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        page.goto(url, timeout=SCRAPER_NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
 
         # Wait for Flipkart's product cards (they use "data-id" instead of "data-asin")
         try:
-            page.wait_for_selector("div[data-id]", timeout=15000)
+            page.wait_for_selector("div[data-id]", timeout=SCRAPER_SELECTOR_TIMEOUT_MS)
         except Exception:
             print("WARNING: Timed out waiting for Flipkart cards")
 
@@ -1406,3 +1758,174 @@ def scrape_flipkart(query, canonical_product, intent_type="main_product", debug_
 
     print(f"\nFinal Flipkart count: {len(products)}")
     return finalize_products(products, "Flipkart", query)
+
+
+def scrape_flipkart(query, canonical_product, intent_type="main_product", debug_titles=False):
+    """Scrape Flipkart with Playwright using the shared ScrapeOps launcher."""
+    return scrape_flipkart_playwright(query, canonical_product, intent_type, debug_titles)
+
+
+# =========================================================
+# RELIANCE DIGITAL SCRAPER
+# =========================================================
+
+def scrape_reliance(query, canonical_product, intent_type="main_product", debug_titles=False):
+    """Scrape Reliance Digital search results into the shared product schema."""
+    query = sanitize_search_query(query)
+    products = []
+    with sync_playwright() as p:
+        browser, context = launch_browser(p)
+        page = context.new_page()
+        try:
+            url = "https://www.reliancedigital.in/search?q=" + query.replace(" ", "+")
+            page.goto(url, timeout=SCRAPER_NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
+            page.wait_for_timeout(3000)
+
+            page_title = page.title().lower()
+            if any(word in page_title for word in ("captcha", "access denied", "blocked", "robot", "attention required")):
+                print(f"RELIANCE BLOCKED: {page.title()}")
+                return make_empty_result("Reliance Digital", query, "Reliance Digital is temporarily blocking automated search.")
+
+            # Reliance Digital uses React-rendered product cards
+            card_selectors = [
+                "div.pdp-card",
+                "div[class*='productCard']",
+                "div[class*='pdp-card']",
+                "div[class*='prod-card']",
+                "li[class*='product']",
+                "[class*='productCardWrap']",
+                "div.product-card",
+            ]
+            cards = []
+            for selector in card_selectors:
+                cards = page.query_selector_all(selector)
+                if cards:
+                    print(f"RELIANCE CARDS: {len(cards)} via {selector}")
+                    break
+
+            if not cards:
+                # Try a broader approach: any link that looks like a product page
+                fallback_links = page.query_selector_all("a[href*='/p/'], a[href*='/buy/']")
+                if fallback_links:
+                    cards = [el for el in fallback_links if el.query_selector("h3, h4, span, p")]
+                    print(f"RELIANCE FALLBACK CARDS: {len(cards)} via product links")
+
+            if not cards:
+                print(f"RELIANCE NO PRODUCT CARDS: title={page.title()} url={page.url}")
+                fallback = _zenrows_products(page.url, canonical_product, "Reliance Digital", query)
+                return fallback or make_empty_result("Reliance Digital", query, "No Reliance Digital product cards were available for this search.")
+
+            for card in cards[:25]:
+                text = card.inner_text().strip()
+                title_el = card.query_selector("h3, h4, [class*='title'], a[title]")
+                title = ""
+                if title_el:
+                    title = (title_el.get_attribute("title") or "").strip() or title_el.inner_text().strip()
+                price = parse_price(text)
+                if not title or not price or not validate_price(price, canonical_product):
+                    continue
+                score = calculate_match_score(title, canonical_product, store="Reliance Digital")
+                if score < get_minimum_score(canonical_product):
+                    continue
+                link_el = card.query_selector("a[href]")
+                href = link_el.get_attribute("href") if link_el else ""
+                # Extract rating if available
+                rating_el = card.query_selector("[class*='rating'], [class*='stars'], span[class*='star']")
+                rating = 0.0
+                if rating_el:
+                    rating_text = rating_el.inner_text().strip()
+                    rating = parse_price(rating_text) if rating_text else 0.0
+                products.append({"product_name": title, "price_inr": price, "original_price": 0,
+                    "discount_percent": 0, "store": "Reliance Digital", "delivery_days": 0, "delivery_label": "",
+                    "rating": rating, "review_count": 0, "offer": "", "stock_status": "In Stock",
+                    "is_reliable": True, "image": "", "product_link": href if href and href.startswith("http") else "https://www.reliancedigital.in" + (href or ""),
+                    "match_score": score, "is_best_price": False})
+        except Exception as error:
+            print(f"RELIANCE SCRAPE ERROR: {error}")
+        finally:
+            context.close()
+            browser.close()
+    return finalize_products(products, "Reliance Digital", query)
+
+
+# =========================================================
+# TATA CLiQ SCRAPER
+# =========================================================
+
+def scrape_tatacliq(query, canonical_product, intent_type="main_product", debug_titles=False):
+    """Scrape Tata CLiQ search results into the shared product schema."""
+    query = sanitize_search_query(query)
+    products = []
+    with sync_playwright() as p:
+        browser, context = launch_browser(p)
+        page = context.new_page()
+        try:
+            url = "https://www.tatacliq.com/search?q=" + query.replace(" ", "+")
+            page.goto(url, timeout=SCRAPER_NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
+            page.wait_for_timeout(3000)
+
+            page_title = page.title().lower()
+            if any(word in page_title for word in ("captcha", "access denied", "blocked", "robot", "attention required")):
+                print(f"TATACLIQ BLOCKED: {page.title()}")
+                return make_empty_result("Tata CLiQ", query, "Tata CLiQ is temporarily blocking automated search.")
+
+            # Tata CLiQ product card selectors
+            card_selectors = [
+                "div.product-card",
+                "div[class*='ProductCard']",
+                "div[class*='productCard']",
+                "li.product-card",
+                "div[class*='product_tile']",
+                "[data-testid*='productCard']",
+                "a[class*='product']",
+            ]
+            cards = []
+            for selector in card_selectors:
+                cards = page.query_selector_all(selector)
+                if cards:
+                    print(f"TATACLIQ CARDS: {len(cards)} via {selector}")
+                    break
+
+            if not cards:
+                # Fallback: search for product listing links
+                fallback_links = page.query_selector_all("a[href*='/product-detail/'], a[href*='/pd/']")
+                if fallback_links:
+                    cards = [el for el in fallback_links if el.query_selector("h3, h4, span, p, img")]
+                    print(f"TATACLIQ FALLBACK CARDS: {len(cards)} via product links")
+
+            if not cards:
+                print(f"TATACLIQ NO PRODUCT CARDS: title={page.title()} url={page.url}")
+                fallback = _zenrows_products(page.url, canonical_product, "Tata CLiQ", query)
+                return fallback or make_empty_result("Tata CLiQ", query, "No Tata CLiQ product cards were available for this search.")
+
+            for card in cards[:25]:
+                text = card.inner_text().strip()
+                title_el = card.query_selector("h3, h4, [class*='title'], [class*='name'], a[title]")
+                title = ""
+                if title_el:
+                    title = (title_el.get_attribute("title") or "").strip() or title_el.inner_text().strip()
+                price = parse_price(text)
+                if not title or not price or not validate_price(price, canonical_product):
+                    continue
+                score = calculate_match_score(title, canonical_product, store="Tata CLiQ")
+                if score < get_minimum_score(canonical_product):
+                    continue
+                link_el = card.query_selector("a[href]")
+                href = link_el.get_attribute("href") if link_el else ""
+                # Extract rating
+                rating_el = card.query_selector("[class*='rating'], [class*='stars'], [class*='Rating']")
+                rating = 0.0
+                if rating_el:
+                    rating_text = rating_el.inner_text().strip()
+                    rating = parse_price(rating_text) if rating_text else 0.0
+                products.append({"product_name": title, "price_inr": price, "original_price": 0,
+                    "discount_percent": 0, "store": "Tata CLiQ", "delivery_days": 0, "delivery_label": "",
+                    "rating": rating, "review_count": 0, "offer": "", "stock_status": "In Stock",
+                    "is_reliable": True, "image": "", "product_link": href if href and href.startswith("http") else "https://www.tatacliq.com" + (href or ""),
+                    "match_score": score, "is_best_price": False})
+        except Exception as error:
+            print(f"TATACLIQ SCRAPE ERROR: {error}")
+        finally:
+            context.close()
+            browser.close()
+    return finalize_products(products, "Tata CLiQ", query)

@@ -1,357 +1,299 @@
 import asyncio
 import json
+import logging
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter
 
-from app.schemas.requests import (
-    SearchRequest,
-    ScrapeRequest,
-)
+from app.schemas.requests import SearchRequest, ScrapeRequest
 
-from app.services.parser import get_intent, debug_log
+from app.services.parser import debug_log
 from app.services.scraper import (
     scrape_amazon,
     scrape_flipkart,
+    scrape_croma,
+    scrape_reliance,
+    scrape_tatacliq,
     scrape_with_fallback,
 )
 
 from app.services.chatbot import ChatBot
-
-from app.utils.helpers import (
-    normalize_product,
-)
+from app.services.recommendation import get_product_advice
+from app.agent.crew import run_crew_for_turn
 
 router = APIRouter()
+logger = logging.getLogger("shoppingmind.search")
 
 chatbot = ChatBot()
 
-@router.post("/search")
-async def search(
-    payload: SearchRequest,
-    background_tasks: BackgroundTasks,
-    ):
-    try:
-        query = payload.query.strip()
-        session_id = payload.session_id
 
-        debug_log(f"\n{'=' * 50}")
-        debug_log(f"USER [{session_id}]: {query}")
+def _build_context(session_id: str, query: str, filters: dict | None = None):
+    """Load conversation history and build the context string for the crew."""
+    history = chatbot.get_history(session_id)
+    is_first_message = len(history) == 0
 
-        if not query:
-            return {"status": "error", "message": "Empty query received."}
-
-        history = chatbot.get_history(session_id)
-
-        is_first_message = len(history) == 0
-
-        # FIX: build full_context ONCE, inside the if/else, instead of building it
-        # twice (a leftover assignment was overwritten by a second block that
-        # referenced context_lines even when it was never created — caused a
-        # NameError crash on every first message)
-        if is_first_message:
-            debug_log("FIRST MESSAGE -> Skip DB History")
-
-            full_context = f"""Latest User Input:
-{query}""".strip()
-
-        else:
-            debug_log("FOLLOW-UP MESSAGE -> Load DB History")
-
-            context_lines = [
-                f"{m['role'].upper()}: {m['content']}"
-                for m in history
-            ]
-
-            # Count how many clarifying (non-CONFIRMED_STATE) assistant replies
-            # have already gone out this session, so the model can be told —
-            # per prompt.txt Section 7a — to stop asking and move on.
-            conversation_round = sum(
-                1
-                for m in history
-                if m["role"] == "assistant"
-                and not m["content"].startswith("CONFIRMED_STATE:")
-            )
-
-            debug_log(f"CONVERSATION_ROUND: {conversation_round}")
-
-            full_context = f"""Previous Conversation:
+    if is_first_message:
+        debug_log("AGENT MODE: FIRST MESSAGE -> Skip DB History")
+        filter_context = f"\nSelected Filters:\n{json.dumps(filters, ensure_ascii=False)}" if filters else ""
+        full_context = f"Latest User Input:\n{query}{filter_context}"
+        conversation_round = 0
+    else:
+        debug_log("AGENT MODE: FOLLOW-UP MESSAGE -> Load DB History")
+        context_lines = [f"{m['role'].upper()}: {m['content']}" for m in history]
+        conversation_round = sum(
+            1
+            for m in history
+            if m["role"] == "assistant"
+            and not m["content"].startswith("CONFIRMED_STATE:")
+        )
+        full_context = f"""Previous Conversation:
 {chr(10).join(context_lines)}
 
 CONVERSATION_ROUND: {conversation_round}
 
 Latest User Input:
-{query}""".strip()
+{query}
 
-        # chatbot.add_message(session_id, "user", query)
+Selected Filters:
+{json.dumps(filters, ensure_ascii=False) if filters else "None"}""".strip()
 
-        result = get_intent(full_context)
+    return full_context, conversation_round, is_first_message
 
-        search_mode = result.get("search_mode", "exact_search")
 
-        debug_log(f"INTENT RESULT: {result.get('status')} | MODE: {search_mode}")
+def _record_assistant_reply(session_id, query, assistant_message, state_snapshot=None):
+    """Save the assistant reply (and optional state snapshot) to the DB."""
+    if assistant_message:
+        chatbot.save_conversation(session_id, query, assistant_message)
+    if state_snapshot is not None:
+        chatbot.save_conversation(
+            session_id, query, "CONFIRMED_STATE:" + json.dumps(state_snapshot)
+        )
 
-        if result.get("status") == "ready":
-            data = result.get("data", {})
-            canonical_product = data.get("canonical_product", {})
-            search_query = data.get("search_query", "")
-            intent_type = canonical_product.get("intent_type", "main_product")
 
-            debug_log(f"SEARCH QUERY: {search_query}")
+def _normalize_canonical_product(payload: dict) -> dict:
+    """Normalize the crew's canonical_product to match the scraper's key style."""
+    raw = payload.get("canonical_product", {}) or {}
+    normalized = {
+        k: (v[0] if isinstance(v, list) and v else v)
+        for k, v in raw.items()
+        if v is not None and str(v).strip().lower() not in ("no preference", "", "none")
+    }
+    # Normalize category labels so plural UI options match product-title tokens.
+    product_type = str(normalized.get("product_type", "")).strip().lower()
+    category_aliases = {
+        "smartphones": "smartphone",
+        "mobiles": "mobile phone",
+        "laptops": "laptop",
+        "headphones": "headphone",
+        "earbuds": "earbud",
+        "televisions": "television",
+        "tvs": "television",
+        "refrigerators": "refrigerator",
+        "fridges": "refrigerator",
+        "washing machines": "washing machine",
+    }
+    if product_type in category_aliases:
+        normalized["product_type"] = category_aliases[product_type]
+
+    # Copy price info into fields the scraper's filters expect
+    max_price = normalized.pop("max_price", None) or normalized.pop("Max price", None)
+    if max_price:
+        normalized["max_price"] = str(max_price)
+    return normalized
+
+
+@router.post("/search")
+async def search(payload: SearchRequest):
+    """Route the user's message through the CrewAI agent crew.
+
+    The crew returns a structured JSON payload matching the same frontend
+    contract as the original pipeline: type in
+    {text, conversation, parsed_query, results}, plus the scraper triggers
+    search_query / canonical_product when type == parsed_query.
+    """
+    try:
+        query = payload.query.strip()
+        session_id = payload.session_id
+
+        debug_log(f"\n{'=' * 50}")
+        debug_log(f"AGENT USER [{session_id}]: {query}")
+
+        if not query:
+            return {"status": "error", "message": "Empty query received."}
+
+        full_context, conversation_round, _ = _build_context(session_id, query, payload.filters)
+
+        result = await run_crew_for_turn(
+            session_id=session_id,
+            user_query=query,
+            conversation_history=full_context,
+            conversation_round=conversation_round,
+        )
+
+        if result.get("fallback"):
+            debug_log(f"AGENT FALLBACK: {result.get('message', '')[:200]}")
+            message = (
+                result.get("message")
+                or "Something went wrong on my end. Please try again."
+            )
+            _record_assistant_reply(session_id, query, message)
+            return {
+                "status": "success",
+                "data": {"type": "text", "message": message},
+            }
+
+        response_type = result.get("type", "text")
+        assistant_message = result.get("message", "")
+
+        if response_type == "parsed_query":
+            canonical_product = _normalize_canonical_product(result)
+            search_query = result.get("search_query", "")
+            loading = result.get("loading", {})
 
             if not search_query:
-                return {"status": "error", "message": "Failed to generate search query."}
-
-            # Detect if the "extracted details" card was already shown this session
-            # (marked by a CONFIRMED_STATE: prefix in history)
-            already_shown = any(
-                m["role"] == "assistant" and m["content"].startswith("CONFIRMED_STATE:")
-                for m in history
-            )
-
-            if not already_shown:
+                debug_log("AGENT: no search_query in parsed_query response -> treating as conversation")
+                response_type = "conversation"
+            else:
                 state_snapshot = {
                     "confirmed_canonical_product": canonical_product,
                     "search_query": search_query,
-                    "filters_offered_this_turn": list(data.get("filters", {}).keys()),
+                    "filters_offered_this_turn": list(result.get("filters", {}).keys()),
+                    "loading": loading,
                 }
-
-                assistant_message = result.get("message", "")
-                if assistant_message:
-                    background_tasks.add_task(
-                        chatbot.save_conversation,
-                        session_id,
-                        query,
-                        assistant_message,
-                    )
-
-                background_tasks.add_task(
-                    chatbot.save_conversation,
-                    session_id,
-                    query,
-                    "CONFIRMED_STATE:" + json.dumps(state_snapshot),
+                _record_assistant_reply(
+                    session_id, query, assistant_message, state_snapshot
                 )
-
                 return {
                     "status": "success",
                     "data": {
                         "type": "parsed_query",
                         "search_query": search_query,
                         "canonical_product": canonical_product,
-                        "filters": data.get("filters", {}),
-                        "intent_type": intent_type,
+                        "filters": result.get("filters", {}),
+                        "intent_type": result.get("intent_type", "main_product"),
+                        "loading": loading,
                     },
                 }
 
-            return {
-                "status": "success",
-                "data": {
-                    "type": "ready_to_scrape",
-                    "message": "Ready to search products.",
-                    "search_query": search_query,
-                    "canonical_product": canonical_product,
-                    "intent_type": intent_type,
-                },
-            }
-
-        elif result.get("status") == "refine":
-            message = result.get("message", "Please select your preferences.")
-            background_tasks.add_task(
-                chatbot.save_conversation,
-                session_id,
-                query,
-                message,
-            )
-
-            return {
-                "status": "success",
-                "data": {
-                    "type": "conversation",
-                    "assistant_message": message,
-                    "confidence": result.get("confidence", "medium"),
-                    "filters": result.get("filters", {}),
-                    "category": result.get("category", "general"),
-                    "next_action": "refine",
-                },
-            }
-        elif result.get("status") == "conversation":
-            message = result.get("assistant_message", "")
-
-            background_tasks.add_task(
-                chatbot.save_conversation,
-                session_id,
-                query,
-                message,
-            )   
-            return {
-                    "status": "success",
-                    "data": {
-                        "type": "conversation",
-                        "message": message,
-                        "cards": result.get("cards", []),
-                        "confidence": result.get("confidence", "medium"),
-                        "questions": result.get("questions", []),
-                        "chips": result.get("chips", []),
-                        "recommendations": result.get("recommendations", []),
-                        "comparison": result.get("comparison"),
-                        "product_line": result.get("product_line"),
-                        "next_action": result.get("next_action", "conversation"),
-                        "missing_required_attributes": result.get(
-                            "missing_required_attributes", []
-                        ),
-                    },
-                }
-        elif result.get("status") == "results":
-            background_tasks.add_task(
-                chatbot.save_conversation,
-                session_id,
-                query,
-                result.get("message", ""),
-            )
-
+        if response_type == "results":
+            products = result.get("products", [])
+            _record_assistant_reply(session_id, query, assistant_message)
             return {
                 "status": "success",
                 "data": {
                     "type": "results",
-                    "message": result.get("message", ""),
-                    "products": result.get("products", []),
+                    "message": assistant_message,
+                    "products": products,
                     "follow_ups": result.get("follow_ups", []),
                 },
             }
 
-        elif result.get("status") == "chat":
-            message = result.get("message", "How can I help you shop today?")
-            background_tasks.add_task(
-                chatbot.save_conversation,
-                session_id,
-                query,
-                message,
-            )
-
-            return {
-                "status": "success",
-                "data": {
-                    "type": "text",
-                    "message": message,
-                    "cards": result.get("cards", []),
-                },
-            }
-
-        elif result.get("status") == "reject":
-            message = (
-                result.get("reason")
-                or "I'm a shopping assistant — I can help you find and compare product prices on Amazon and Flipkart. What would you like to buy?"
-            )
-            background_tasks.add_task(
-                chatbot.save_conversation,
-                session_id,
-                query,
-                message,
-            )
-
-            return {
-                "status": "success",
-                "data": {
-                    "type": "text",
-                    "message": message,
-                },
-            }
-
+        # conversation | text | chat — all map to a conversational reply
+        _record_assistant_reply(session_id, query, assistant_message)
         return {
-            "status": "error",
-            "message": result.get("message", "Something went wrong. Please try again."),
+            "status": "success",
+            "data": {
+                "type": "conversation" if response_type == "conversation" else "text",
+                "message": assistant_message,
+                "cards": result.get("cards", []),
+                "filters": result.get("filters", {}),
+                "confidence": result.get("confidence", "medium"),
+                "questions": result.get("questions", []),
+                "chips": result.get("chips", []),
+                "recommendations": result.get("recommendations", []),
+                "comparison": result.get("comparison"),
+                "product_line": result.get("product_line"),
+                "follow_ups": result.get("follow_ups", []),
+            },
         }
-    except Exception as e:
-        debug_log(f"MAIN API ERROR: {e}")
-        return {"status": "error", "message": str(e)}
+
+    except Exception as exc:
+        logger.exception("Agent API request failed")
+        debug_log("AGENT API ERROR: request failed; details recorded in server logs")
+        return {"status": "error", "message": "The shopping assistant is temporarily unavailable. Please try again."}
 
 
 @router.post("/scrape")
 async def scrape(payload: ScrapeRequest):
+    """Direct scraper endpoint — deterministic logic, still used by the
+    frontend 'Search Products' button and runnable as a standalone tool."""
     try:
         search_query = payload.search_query
         canonical_product = payload.canonical_product
 
-        intent_type = canonical_product.get(
-            "intent_type",
-            "main_product"
-        )
+        intent_type = canonical_product.get("intent_type", "main_product")
 
         debug_log(f"\n{'=' * 60}")
         debug_log(f"SCRAPING: {search_query}")
 
-        amazon_task = asyncio.to_thread(
-            scrape_with_fallback,
-            scrape_amazon,
-            search_query,
-            canonical_product,
-            intent_type,
-        )
-
-        flipkart_task = asyncio.to_thread(
-            scrape_with_fallback,
-            scrape_flipkart,
-            search_query,
-            canonical_product,
-            intent_type,
-        )
-
-        amazon_results, flipkart_results = await asyncio.gather(
-            amazon_task,
-            flipkart_task,
-        )
-
-        amazon_best = [
-            p
-            for p in amazon_results
-            if p.get("is_reliable")
-            and p.get("price_inr", 0) > 0
+        # Playwright-based scrapers are synchronous, so run every dedicated
+        # marketplace scraper in its own worker thread. This keeps FastAPI
+        # responsive and makes all five marketplace agents active in this path.
+        marketplaces = [
+            ("Amazon", scrape_amazon),
+            ("Flipkart", scrape_flipkart),
+            ("Croma", scrape_croma),
+            ("Reliance Digital", scrape_reliance),
+            ("Tata CLiQ", scrape_tatacliq),
         ]
 
-        flipkart_best = [
-            p
-            for p in flipkart_results
-            if p.get("is_reliable")
-            and p.get("price_inr", 0) > 0
-        ]
+        async def run_marketplace(store_name, scraper):
+            try:
+                debug_log(f"MARKETPLACE START: {store_name}")
+                results = await asyncio.to_thread(
+                    scrape_with_fallback,
+                    scraper,
+                    search_query,
+                    canonical_product,
+                    intent_type,
+                )
+                debug_log(f"MARKETPLACE DONE: {store_name}: {len(results)} candidates")
+                return store_name, results
+            except Exception as exc:
+                logger.exception("%s scrape failed", store_name)
+                debug_log(f"MARKETPLACE ERROR: {store_name}: {exc}")
+                return store_name, []
 
+        # ScrapeOps Proxy API plans can have a low concurrency limit. Run the
+        # five stores sequentially so one request does not cause 429 failures
+        # for the remaining marketplaces.
+        marketplace_results = {}
+        for name, scraper in marketplaces:
+            store_name, results = await run_marketplace(name, scraper)
+            marketplace_results[store_name] = results
         all_products = []
-
-        all_products.extend(amazon_best[:1])
-        all_products.extend(flipkart_best[:1])
+        for store_name, results in marketplace_results.items():
+            reliable = [
+                p for p in results
+                if p.get("is_reliable") and p.get("price_inr", 0) > 0
+            ]
+            selected = reliable[:3] or results[:1]
+            all_products.extend(selected)
+            debug_log(f"MARKETPLACE RESULTS: {store_name}: {len(selected)} returned")
 
         if all_products:
-            priced = [
-                p
-                for p in all_products
-                if p["price_inr"] > 0
-            ]
-
+            priced = [p for p in all_products if p.get("price_inr", 0) > 0]
+            for p in all_products:
+                p["is_best_price"] = False
             if priced:
-                for p in all_products:
-                    p["is_best_price"] = False
+                min(priced, key=lambda x: x["price_inr"])["is_best_price"] = True
 
-                min(
-                    priced,
-                    key=lambda x: x["price_inr"]
-                )["is_best_price"] = True
-
-        # Fallback: avoid returning empty results if scrapers found something but scored it low
-        if not all_products:
-            all_products = amazon_results[:1] or flipkart_results[:1]
+        advice = await asyncio.to_thread(get_product_advice, search_query, all_products)
 
         return {
             "status": "success",
             "data": {
                 "type": "products",
                 "products": all_products,
+                "message": advice,
                 "canonical_product": canonical_product,
                 "search_query": search_query,
             },
         }
 
-    except Exception as e:
-        debug_log(f"SCRAPE ERROR: {e}")
+    except Exception as exc:
+        logger.exception("Scrape request failed")
+        debug_log("SCRAPE ERROR: request failed; details recorded in server logs")
         return {
             "status": "error",
-            "message": str(e),
+            "message": "Product search is temporarily unavailable. Please try again.",
         }

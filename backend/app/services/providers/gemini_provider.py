@@ -12,9 +12,10 @@ load_dotenv()
 class GeminiProvider(BaseProvider):
 
     def __init__(self):
-        self.client = genai.Client(
-            api_key=os.getenv("GEMINI_API_KEY")
-        )
+        self.client = None
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key:
+            self.client = genai.Client(api_key=api_key)
 
     def generate(
         self,
@@ -23,6 +24,10 @@ class GeminiProvider(BaseProvider):
         temperature: float,
         max_tokens: int,
     ):
+        if self.client is None:
+            raise RuntimeError(
+                "GEMINI_API_KEY is not set. Add it to your environment or .env before using Gemini."
+            )
 
         response = self.client.models.generate_content(
             model="gemini-3.1-flash-lite",

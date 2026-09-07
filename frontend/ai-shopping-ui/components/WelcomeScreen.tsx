@@ -1,177 +1,122 @@
 "use client"
 
-import React from "react";
-import { T } from "@/styles/theme";
-import { QUICKCHIPS } from "@/lib/constants";
-import { motion, Variants } from "framer-motion";
 import {
   ArrowRight,
-  Smartphone,
+  BadgePercent,
+  BarChart3,
   Headphones,
   Laptop,
-  Watch,
-} from "lucide-react";
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  Star,
+  Tag,
+  Users,
+  Zap,
+} from "lucide-react"
+import { motion } from "framer-motion"
 
-interface WelcomeScreenProps {
-  handleSend: (text: string) => void;
-}
+type WelcomeScreenProps = { handleSend: (text: string) => void }
 
-export default function WelcomeScreen({
-  handleSend,
-}: WelcomeScreenProps) {
-  const getIcon = (label: string) => {
-    const lowLabel = label.toLowerCase();
-    if (lowLabel.includes("iphone")) return Smartphone;
-    if (lowLabel.includes("sony") || lowLabel.includes("boat")) return Headphones;
-    if (lowLabel.includes("laptop")) return Laptop;
-    if (lowLabel.includes("watch")) return Watch;
-    return Smartphone;
-  };
+type SearchTile = { label: string; price: string; icon: typeof Smartphone; image: string; tone: string }
 
-  const containerVariants: Variants = {
-    hidden: { opacity: 0 },
-    visible: { opacity: 1, transition: { staggerChildren: 0.08 } },
-  };
+const searchTiles: SearchTile[] = [
+  { label: "iPhone 15", price: "From ₹64,999", icon: Smartphone, image: "/iphone-15.png", tone: "#e8f7f0" },
+  { label: "boAt Headphones", price: "From ₹1,299", icon: Headphones, image: "/black-headphones.webp", tone: "#f1e8ff" },
+  { label: "Gaming Laptops under ₹60K", price: "From ₹45,990", icon: Laptop, image: "/gaming-laptop.webp", tone: "#ebeafe" },
+  { label: "Sony WH-1000XM5", price: "From ₹24,990", icon: Headphones, image: "/black-headphones.webp", tone: "#fff1de" },
+]
 
-  const itemVariants: Variants = {
-    hidden: { y: 16, opacity: 0 },
-    visible: { y: 0, opacity: 1, transition: { duration: 0.4, ease: "easeOut" as any } },
-  };
+const features = [
+  { title: "Compare Prices", subtitle: "Across top stores", query: "Compare prices across Amazon Flipkart Croma Reliance Digital and Tata CLiQ", icon: Tag, tone: "#ffe1db", color: "#f26d66" },
+  { title: "Read Reviews", subtitle: "Real user insights", query: "Find the best rated products with reviews", icon: Star, tone: "#eee2ff", color: "#8a5ae9" },
+  { title: "Best Deals", subtitle: "Handpicked for you", query: "Show me today's best shopping deals", icon: BadgePercent, tone: "#ddf6df", color: "#42ad6b" },
+  { title: "Trusted Results", subtitle: "Accurate & reliable", query: "Find reliable products with good ratings and delivery", icon: ShieldCheck, tone: "#e4ecff", color: "#5572dd" },
+]
 
+function SearchArt({ Icon, image }: { Icon: typeof Smartphone; image?: string }) {
   return (
-    <div
-      style={{
-        flex: 1,
-        minHeight: 0, // lets this shrink inside the flex parent instead of clipping
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "32px 24px",
-        textAlign: "center",
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
-      {/* Robot, positioned right, full color, no glow/dim */}
-      <motion.div
-        initial={{ opacity: 0, x: 60 }}
-        animate={{ opacity: 2, x: 0 }}
-        transition={{ duration: 0.9, ease: "easeOut" as any }}
-        style={{
-          position: "absolute",
-          right: "1%",
-          bottom: "2%",       // anchor to bottom instead of vertical-centering
-          height: "100%",       // smaller % so full figure (head to feet) fits with room to spare
-          pointerEvents: "none",
-          zIndex: 0,
-        }}
-      >
-        <img
-          src="/robot-mascot.png"
-          alt="Robot"
-          style={{
-            height: "100%",
-            width: "auto",
-            maxWidth: "38vw",
-            objectFit: "contain",
-          }}
-        />
-      </motion.div>
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-        style={{ position: "relative", zIndex: 1, maxWidth: 600 }}
-      >
-        <motion.h1
-          variants={itemVariants}
-          style={{
-            fontSize: "clamp(30px, 4.4vw, 48px)",
-            fontWeight: 900,
-            color: "#fff",
-            lineHeight: 1.15,
-            marginBottom: 16,
-            letterSpacing: "-1px",
-          }}
-        >
-          Find the Perfect Product
-          <span
-            style={{
-              background: `linear-gradient(135deg, ${T.accent}, ${T.indigo})`,
-              WebkitBackgroundClip: "text" as any,
-              WebkitTextFillColor: "transparent" as any,
-            }}
-          >
-            In Seconds.
-          </span>
-        </motion.h1>
-
-        <motion.p
-          variants={itemVariants}
-          style={{ fontSize: 17, color: T.text1, marginBottom: 28, lineHeight: 1.6 }}
-        >
-          Your AI shopping consultant that compares prices, reads reviews, and finds the best deals for you.
-        </motion.p>
-
-        <motion.div
-          variants={itemVariants}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(2, minmax(220px, 1fr))",
-            gap: 14,
-            width: "100%",
-          }}
-        >
-          {QUICKCHIPS.slice(0, 4).map((chip, i) => {
-            const Icon = chip.icon || getIcon(chip.label);
-            const col = chip.from;
-
-            return (
-              <motion.button
-                key={i}
-                whileHover={{ scale: 1.02, background: "rgba(255, 255, 255, 0.05)" }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => handleSend(chip.label)}
-                style={{
-                  padding: "18px",
-                  borderRadius: 22,
-                  background: "rgba(255, 255, 255, 0.03)",
-                  border: `1px solid ${T.border}`,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  transition: "all 0.2s",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                  <div
-                    style={{
-                      width: 42,
-                      height: 42,
-                      borderRadius: 14,
-                      background: `${col}15`,
-                      display: "flex",
-                      justifyContent: "center",
-                      alignItems: "center",
-                      flexShrink: 0,
-                      border: `1px solid ${col}30`,
-                    }}
-                  >
-                    <Icon color={col} size={21} />
-                  </div>
-                  <div style={{ textAlign: "left" }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: T.text0 }}>{chip.label}</div>
-                    <div style={{ marginTop: 2, color: T.text2, fontSize: 12 }}>Find best prices</div>
-                  </div>
-                </div>
-                <ArrowRight color={T.text2} size={17} />
-              </motion.button>
-            );
-          })}
-        </motion.div>
-      </motion.div>
+    <div className="search-art">
+      {image ? <img src={image} alt="" /> : <Icon />}
     </div>
-  );
+  )
 }
+
+export default function WelcomeScreen({ handleSend }: WelcomeScreenProps) {
+  return (
+    <div className="home-content">
+      <section className="hero-section">
+        <div className="hero-copy">
+          <motion.h1 initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .45 }}>
+            Find the Perfect<br />Product <span className="gradient-text">In Seconds.</span>
+          </motion.h1>
+          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: .1, duration: .45 }}>
+            Your AI shopping consultant that compares prices,<br className="desktop-break" /> reads reviews, and finds the best deals for you.
+          </motion.p>
+          <motion.div className="feature-row" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .16, duration: .45 }}>
+            {features.map(({ title, subtitle, query, icon: Icon, tone, color }) => (
+              <button type="button" className="feature-tile" key={title} onClick={() => handleSend(query)}>
+                <div className="feature-icon" style={{ background: tone, color }}><Icon /></div>
+                <div><strong>{title}</strong><small>{subtitle}</small></div>
+              </button>
+            ))}
+          </motion.div>
+        </div>
+
+        <div className="hero-decor one"><Sparkles size={30} /></div>
+        <div className="hero-decor two"><Tag size={31} /></div>
+        <div className="hero-decor three"><ShoppingCartDecor /></div>
+        <img className="hero-robot" src="/robot-reference.png" alt="Ottixhow shopping assistant robot" />
+        <div className="robot-bubble"><strong>Hi! 👋</strong>I’ll find the best<br />deal for you!</div>
+      </section>
+
+      <section className="dashboard-grid">
+        <div className="panel popular-panel">
+          <div className="panel-heading"><h2><span aria-hidden="true">🔥</span> Popular Searches</h2><button type="button" aria-label="See more searches"><ArrowRight size={17} /></button></div>
+          <div className="search-carousel">
+            {searchTiles.map(({ label, price, icon: Icon, image, tone }) => (
+              <button type="button" className="search-card" key={label} onClick={() => handleSend(label)}>
+                <div style={{ color: tone === "#e8f7f0" ? "#227e6a" : tone === "#f1e8ff" ? "#8264c7" : tone === "#ebeafe" ? "#525bbd" : "#ad6c2b" }}><SearchArt Icon={Icon} image={image} /></div>
+                <strong>{label}</strong>
+                <span>{price}</span>
+                <span className="search-arrow"><ArrowRight /></span>
+              </button>
+            ))}
+          </div>
+          <div className="carousel-dots" aria-hidden="true"><span /><span /><span /></div>
+        </div>
+
+        <div className="panel deal-panel">
+          <div className="panel-heading deal-heading"><h2><Zap size={19} /> Today’s Top Deal</h2></div>
+          <div className="deal-card">
+            <h3>Noise ColorFit Pro 4</h3>
+            <p>Smartwatch</p>
+            <div className="deal-price"><strong>₹2,499</strong><del>₹4,999</del><span className="deal-percent">50% OFF</span></div>
+            <WatchDealArt />
+          </div>
+          <button type="button" className="deal-button" onClick={() => handleSend("Noise ColorFit Pro 4 smartwatch deal")}><span>View Deal</span><ArrowRight size={18} /></button>
+        </div>
+      </section>
+
+      <section className="panel stat-strip">
+        <Stat icon={BarChart3} tone="#ddf6df" color="#45ad6c" value="1M+" label="Products Compared" />
+        <Stat icon={Users} tone="#eadcff" color="#9a5be4" value="500K+" label="Happy Shoppers" />
+        <Stat icon={Star} tone="#fff0c9" color="#efa940" value="4.8 ★" label="User Rating" />
+        <Stat icon={Zap} tone="#e1e8ff" color="#6076df" value="Real-time" label="Price Updates" />
+      </section>
+    </div>
+  )
+}
+
+function Stat({ icon: Icon, tone, color, value, label }: { icon: typeof BarChart3; tone: string; color: string; value: string; label: string }) {
+  return <div className="stat-item"><div className="stat-icon" style={{ background: tone, color }}><Icon /></div><div className="stat-copy"><strong>{value}</strong><span>{label}</span></div></div>
+}
+
+function WatchDealArt() {
+  return <img className="deal-watch" src="/noise-smartwatch.webp" alt="Noise ColorFit Pro 4 smartwatch" />
+}
+
+function ShoppingCartDecor() {
+  return <div style={{ display: "flex", gap: 4, alignItems: "flex-end" }}><span style={{ display: "block", width: 23, height: 17, border: "2px solid currentColor", borderTop: 0, transform: "skew(-14deg)" }} /><span style={{ width: 5, height: 5, borderRadius: "50%", background: "currentColor" }} /><span style={{ width: 5, height: 5, borderRadius: "50%", background: "currentColor" }} /></div>
+}
+
