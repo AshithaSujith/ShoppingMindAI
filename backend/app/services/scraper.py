@@ -1,4 +1,3 @@
-import json
 import re                  # For pattern matching (extracting prices, numbers, codes from text)
 import random              # For adding random delays so we don't look like a bot
 import time                # For adding wait/sleep pauses between page actions
@@ -9,26 +8,6 @@ from playwright.sync_api import sync_playwright  # Playwright controls a real br
 from bs4 import BeautifulSoup
 
 from app.services.zenrows import fetch_html
-
-_AGENT_DEBUG_LOG_PATH = "/Users/mac/orbio/ShoppingMindAI/.cursor/debug-37cb24.log"
-
-
-def _agent_debug_log(location: str, message: str, data: dict, hypothesis_id: str, run_id: str = "pre-fix") -> None:
-    # region agent log
-    try:
-        with open(_AGENT_DEBUG_LOG_PATH, "a", encoding="utf-8") as debug_file:
-            debug_file.write(json.dumps({
-                "sessionId": "37cb24",
-                "location": location,
-                "message": message,
-                "data": data,
-                "hypothesisId": hypothesis_id,
-                "runId": run_id,
-                "timestamp": int(time.time() * 1000),
-            }) + "\n")
-    except Exception:
-        pass
-    # endregion
 
 
 # Keep the synchronous marketplace work within the frontend's scrape timeout.
@@ -1613,12 +1592,11 @@ def scrape_croma(query, canonical_product, intent_type="main_product", debug_tit
     query = sanitize_search_query(query)
     products = []
     search_url = _croma_search_url(query)
-    pincode = _croma_default_pincode()
     with sync_playwright() as p:
         browser, context = launch_browser(p)
         page = context.new_page()
         try:
-            pincode = _seed_croma_location(context, page)
+            _seed_croma_location(context, page)
             page.goto(search_url, timeout=SCRAPER_NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
             try:
                 page.wait_for_selector("li.product-item", timeout=SCRAPER_SELECTOR_TIMEOUT_MS)
@@ -1627,34 +1605,9 @@ def scrape_croma(query, canonical_product, intent_type="main_product", debug_tit
 
             page_title = page.title().lower()
             blocked = any(word in page_title for word in ("captcha", "access denied", "blocked", "robot"))
-            # region agent log
-            _agent_debug_log(
-                "scraper.py:scrape_croma",
-                "Croma page loaded",
-                {
-                    "search_url": search_url,
-                    "pincode": pincode,
-                    "page_title": page.title(),
-                    "page_url": page.url,
-                    "blocked": blocked,
-                    "body_text_len": page.evaluate("document.body ? document.body.innerText.length : 0"),
-                },
-                "H6",
-                run_id="post-fix",
-            )
-            # endregion
             if blocked:
                 print(f"CROMA BLOCKED: {page.title()}")
                 fallback = _zenrows_products(search_url, canonical_product, "Croma", query)
-                # region agent log
-                _agent_debug_log(
-                    "scraper.py:scrape_croma",
-                    "Croma blocked ZenRows fallback",
-                    {"fallback_count": len(fallback or []), "search_url": search_url},
-                    "H2",
-                    run_id="post-fix",
-                )
-                # endregion
                 return fallback or make_empty_result("Croma", query, "Croma is temporarily blocking automated search.")
 
             card_selectors = [
@@ -1666,31 +1619,15 @@ def scrape_croma(query, canonical_product, intent_type="main_product", debug_tit
                 "a[href*='/p/']",
             ]
             cards = []
-            matched_selector = ""
             for selector in card_selectors:
                 cards = page.query_selector_all(selector)
                 if cards:
-                    matched_selector = selector
                     print(f"CROMA CARDS: {len(cards)} via {selector}")
                     break
 
             if not cards:
                 print(f"CROMA NO PRODUCT CARDS: title={page.title()} url={page.url}")
                 fallback = _zenrows_products(search_url, canonical_product, "Croma", query)
-                # region agent log
-                _agent_debug_log(
-                    "scraper.py:scrape_croma",
-                    "Croma no cards ZenRows fallback",
-                    {
-                        "fallback_count": len(fallback or []),
-                        "page_title": page.title(),
-                        "search_url": search_url,
-                        "pincode": pincode,
-                    },
-                    "H8",
-                    run_id="post-fix",
-                )
-                # endregion
                 return fallback or make_empty_result(
                     "Croma",
                     query,
@@ -1713,21 +1650,6 @@ def scrape_croma(query, canonical_product, intent_type="main_product", debug_tit
                     "rating": 0, "review_count": 0, "offer": "", "stock_status": "In Stock",
                     "is_reliable": True, "image": "", "product_link": href if href and href.startswith("http") else "https://www.croma.com" + (href or ""),
                     "match_score": score, "is_best_price": False})
-            # region agent log
-            _agent_debug_log(
-                "scraper.py:scrape_croma",
-                "Croma scrape complete",
-                {
-                    "matched_selector": matched_selector,
-                    "card_count": len(cards),
-                    "product_count": len(products),
-                    "search_url": search_url,
-                    "pincode": pincode,
-                },
-                "H3",
-                run_id="post-fix",
-            )
-            # endregion
         except Exception as error:
             print(f"CROMA SCRAPE ERROR: {error}")
         finally:
@@ -2020,19 +1942,6 @@ def scrape_tatacliq(query, canonical_product, intent_type="main_product", debug_
 
             page_title = page.title().lower()
             blocked = any(word in page_title for word in ("captcha", "access denied", "blocked", "robot", "attention required"))
-            # region agent log
-            _agent_debug_log(
-                "scraper.py:scrape_tatacliq",
-                "TataCliq page loaded",
-                {
-                    "page_title": page.title(),
-                    "page_url": page.url,
-                    "blocked": blocked,
-                    "body_text_len": page.evaluate("document.body ? document.body.innerText.length : 0"),
-                },
-                "H4",
-            )
-            # endregion
             if blocked:
                 print(f"TATACLIQ BLOCKED: {page.title()}")
                 return make_empty_result("Tata CLiQ", query, "Tata CLiQ is temporarily blocking automated search.")
@@ -2049,11 +1958,9 @@ def scrape_tatacliq(query, canonical_product, intent_type="main_product", debug_
                 "[data-testid*='productCard']",
             ]
             cards = []
-            matched_selector = ""
             for selector in card_selectors:
                 cards = page.query_selector_all(selector)
                 if cards:
-                    matched_selector = selector
                     print(f"TATACLIQ CARDS: {len(cards)} via {selector}")
                     break
 
@@ -2062,25 +1969,13 @@ def scrape_tatacliq(query, canonical_product, intent_type="main_product", debug_
                 fallback_links = page.query_selector_all("a[href*='/p-']")
                 if fallback_links:
                     cards = [el for el in fallback_links if el.query_selector("img, [class*='content'], h3, h4, span, p")]
-                    matched_selector = "a[href*='/p-']"
                     print(f"TATACLIQ FALLBACK CARDS: {len(cards)} via product links")
 
             if not cards:
                 print(f"TATACLIQ NO PRODUCT CARDS: title={page.title()} url={page.url}")
                 fallback = _zenrows_products(page.url, canonical_product, "Tata CLiQ", query)
-                # region agent log
-                _agent_debug_log(
-                    "scraper.py:scrape_tatacliq",
-                    "TataCliq no cards ZenRows fallback",
-                    {"fallback_count": len(fallback or []), "page_title": page.title()},
-                    "H2",
-                )
-                # endregion
                 return fallback or make_empty_result("Tata CLiQ", query, "No Tata CLiQ product cards were available for this search.")
 
-            skipped_no_title = 0
-            skipped_no_price = 0
-            skipped_score = 0
             for card in cards[:25]:
                 text = card.inner_text().strip()
                 title_el = card.query_selector(
@@ -2093,15 +1988,10 @@ def scrape_tatacliq(query, canonical_product, intent_type="main_product", debug_
                     lines = [line.strip() for line in text.splitlines() if line.strip()]
                     title = lines[1] if len(lines) > 1 else (lines[0] if lines else "")
                 price = parse_card_price(text)
-                if not title:
-                    skipped_no_title += 1
-                    continue
-                if not price or not validate_price(price, canonical_product):
-                    skipped_no_price += 1
+                if not title or not price or not validate_price(price, canonical_product):
                     continue
                 score = calculate_match_score(title, canonical_product, store="Tata CLiQ")
                 if score < get_minimum_score(canonical_product):
-                    skipped_score += 1
                     continue
                 link_el = card.query_selector("a[href*='/p-'], a[href]")
                 href = link_el.get_attribute("href") if link_el else ""
@@ -2116,21 +2006,6 @@ def scrape_tatacliq(query, canonical_product, intent_type="main_product", debug_
                     "rating": rating, "review_count": 0, "offer": "", "stock_status": "In Stock",
                     "is_reliable": True, "image": "", "product_link": href if href and href.startswith("http") else "https://www.tatacliq.com" + (href or ""),
                     "match_score": score, "is_best_price": False})
-            # region agent log
-            _agent_debug_log(
-                "scraper.py:scrape_tatacliq",
-                "TataCliq scrape complete",
-                {
-                    "matched_selector": matched_selector,
-                    "card_count": len(cards),
-                    "product_count": len(products),
-                    "skipped_no_title": skipped_no_title,
-                    "skipped_no_price": skipped_no_price,
-                    "skipped_score": skipped_score,
-                },
-                "H5",
-            )
-            # endregion
         except Exception as error:
             print(f"TATACLIQ SCRAPE ERROR: {error}")
         finally:
