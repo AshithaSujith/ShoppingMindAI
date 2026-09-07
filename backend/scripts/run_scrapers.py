@@ -328,7 +328,7 @@ def _scrape_platform(
 def scrape_croma(query, canonical_product, intent_type="main_product"):
     return _scrape_platform(
         store_name          = "Croma",
-        search_url_fn       = lambda q: f"https://www.croma.com/searchB?q={q.replace(' ', '%20')}%3Arelevance",
+        search_url_fn       = lambda q: f"https://www.croma.com/searchB?text={q.replace(' ', '+')}",
         item_selectors      = CROMA_ITEM_SELECTORS,
         title_selectors     = CROMA_TITLE_SELECTORS,
         price_selectors     = CROMA_PRICE_SELECTORS,

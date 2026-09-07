@@ -30,12 +30,14 @@ def fetch_html(url: str, *, timeout: int = 20) -> Optional[str]:
     params = {
         "apikey": os.environ["ZENROWS_API_KEY"].strip(),
         "url": url,
-        "mode": os.getenv("ZENROWS_MODE", "auto"),
         "js_render": "true",
         "premium_proxy": "true",
         "proxy_country": os.getenv("ZENROWS_PROXY_COUNTRY", "in"),
         "wait": os.getenv("ZENROWS_WAIT_SECONDS", "3"),
     }
+    zenrows_mode = os.getenv("ZENROWS_MODE", "").strip()
+    if zenrows_mode and zenrows_mode.lower() != "auto":
+        params["mode"] = zenrows_mode
     last_error: Exception | None = None
     for attempt in range(3):
         try:

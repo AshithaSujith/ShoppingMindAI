@@ -622,7 +622,11 @@ async def run_crew_for_turn(session_id: str, user_query: str, conversation_histo
         # Scrape all 5 marketplaces concurrently (no LLM), then only the
         # comparison/negotiation/advisor agents run, on real data.
         search_query = inputs["search_query"]
-        canonical_product = intent_payload.get("canonical_product", {})
+        canonical_product = _enrich_canonical_for_scraper(
+            intent_payload.get("canonical_product", {}),
+            user_query,
+            intent_payload.get("filters"),
+        )
         _trace("SCRAPE START", {"search_query": search_query, "canonical_product": canonical_product})
         scraped = await _scrape_all_marketplaces(search_query, canonical_product)
         for key, result in scraped.items():
@@ -642,6 +646,48 @@ async def run_crew_for_turn(session_id: str, user_query: str, conversation_histo
     except Exception as exc:  # noqa: BLE001
         _trace("ERROR", repr(exc))
         return {"fallback": True, "message": str(exc)}
+
+
+def _enrich_canonical_for_scraper(
+    canonical: dict,
+    user_query: str,
+    filters: dict | None = None,
+) -> dict:
+    """Map intent-router fields to the keys the scraper scoring expects."""
+    enriched = dict(canonical or {})
+    category = str(enriched.get("category", "") or enriched.get("product_type", "")).strip()
+    if category and not enriched.get("product_type"):
+        enriched["product_type"] = category
+
+    product_type = str(enriched.get("product_type", "")).strip().lower()
+    phone_aliases = {
+        "smartphone", "smartphones", "mobile", "mobile phone",
+        "mobiles", "android phone", "android phones",
+    }
+    if product_type in phone_aliases:
+        enriched["product_type"] = "smartphone"
+
+    if not enriched.get("max_price") and filters:
+        budget = filters.get("Budget") or filters.get("budget")
+        if isinstance(budget, list):
+            budget = budget[0] if budget else ""
+        if budget:
+            numbers = re.findall(r"\d+(?:\.\d+)?", str(budget).replace(",", ""))
+            if numbers:
+                enriched["max_price"] = max(float(number) for number in numbers)
+
+    if not enriched.get("max_price"):
+        query = user_query.lower().replace(",", "")
+        k_match = re.search(r"under\s+(\d+(?:\.\d+)?)\s*k\b", query)
+        if k_match:
+            enriched["max_price"] = float(k_match.group(1)) * 1000
+        else:
+            num_match = re.search(r"under\s+(\d+(?:\.\d+)?)", query)
+            if num_match:
+                value = float(num_match.group(1))
+                enriched["max_price"] = value * 1000 if value < 1000 else value
+
+    return enriched
 
 
 def _apply_smart_defaults(payload: dict, user_query: str) -> dict:

@@ -19,6 +19,7 @@ from app.services.scraper import (
 from app.services.chatbot import ChatBot
 from app.services.recommendation import get_product_advice
 from app.agent.crew import run_crew_for_turn
+from app.utils.helpers import normalize_product
 
 router = APIRouter()
 logger = logging.getLogger("shoppingmind.search")
@@ -67,6 +68,36 @@ def _record_assistant_reply(session_id, query, assistant_message, state_snapshot
         chatbot.save_conversation(
             session_id, query, "CONFIRMED_STATE:" + json.dumps(state_snapshot)
         )
+
+
+def _normalize_results_products(products: list) -> list:
+    """Map advisor/scraper product shapes to the frontend contract."""
+    normalized = []
+    for raw in products:
+        if not isinstance(raw, dict):
+            continue
+        price = raw.get("price_inr") or raw.get("price") or raw.get("priceinr") or 0
+        link = raw.get("product_link") or raw.get("link") or raw.get("url") or ""
+        title = raw.get("title") or raw.get("product_name") or raw.get("productname") or ""
+        normalized.append(
+            normalize_product(
+                {
+                    "product_name": title,
+                    "price_inr": float(price) if price else 0,
+                    "original_price": raw.get("original_price") or raw.get("originalprice") or 0,
+                    "discount_percent": raw.get("discount_percent") or raw.get("discountpercent") or 0,
+                    "store": raw.get("store", ""),
+                    "rating": raw.get("rating", 0),
+                    "review_count": raw.get("review_count") or raw.get("reviewcount") or 0,
+                    "image": raw.get("image", ""),
+                    "product_link": link,
+                    "is_reliable": raw.get("is_reliable", raw.get("isreliable", True)),
+                    "is_best_price": raw.get("is_best_price", raw.get("isbestprice", False)),
+                    "delivery_label": raw.get("delivery_label") or raw.get("deliverylabel") or "",
+                }
+            )
+        )
+    return normalized
 
 
 def _normalize_canonical_product(payload: dict) -> dict:
@@ -175,8 +206,11 @@ async def search(payload: SearchRequest):
                 }
 
         if response_type == "results":
-            products = result.get("products", [])
-            _record_assistant_reply(session_id, query, assistant_message)
+            products = _normalize_results_products(result.get("products", []))
+            try:
+                _record_assistant_reply(session_id, query, assistant_message)
+            except Exception:
+                logger.exception("Failed to persist assistant reply for session %s", session_id)
             return {
                 "status": "success",
                 "data": {
