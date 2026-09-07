@@ -1,31 +1,29 @@
 import type { Product } from "@/types/index";
 
+const toNumber = (value: unknown): number | undefined => {
+  if (value === null || value === undefined || value === "") return undefined;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : undefined;
+};
+
 export const normalizeProducts = (
   rawProducts: Record<string, unknown>[]
 ): Product[] =>
-  rawProducts.map((p) => ({
-    ...(p as Record<string, unknown>),
-    priceinr: (p as any).priceinr ?? (p as any).price_inr,
-    originalprice: (p as any).originalprice ?? (p as any).original_price,
-    discountpercent:
-      (p as any).discountpercent ??
-      (p as any).discount_percent,
-    productname:
-      (p as any).productname ??
-      (p as any).product_name,
-    productlink:
-      (p as any).productlink ??
-      (p as any).product_link,
-    reviewcount:
-      (p as any).reviewcount ??
-      (p as any).review_count,
-    deliverylabel:
-      (p as any).deliverylabel ??
-      (p as any).delivery_label,
-    isbestprice:
-      (p as any).isbestprice ??
-      (p as any).is_best_price,
-    isreliable:
-      (p as any).isreliable ??
-      (p as any).is_reliable,
-  }));
+  rawProducts.map((product) => {
+    const value = (camelCase: string, snakeCase: string) =>
+      product[camelCase] ?? product[snakeCase]
+
+    return {
+      ...product,
+      priceinr: toNumber(value("priceinr", "price_inr")),
+      originalprice: toNumber(value("originalprice", "original_price")),
+      discountpercent: toNumber(value("discountpercent", "discount_percent")),
+      productname: value("productname", "product_name") as string | undefined,
+      productlink: value("productlink", "product_link") as string | undefined,
+      reviewcount: toNumber(value("reviewcount", "review_count")),
+      rating: toNumber(product.rating),
+      deliverylabel: value("deliverylabel", "delivery_label") as string | undefined,
+      isbestprice: Boolean(value("isbestprice", "is_best_price")),
+      isreliable: Boolean(value("isreliable", "is_reliable")),
+    }
+  });

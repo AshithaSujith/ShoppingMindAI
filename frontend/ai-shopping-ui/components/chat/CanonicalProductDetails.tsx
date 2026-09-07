@@ -172,7 +172,7 @@ export default function CanonicalProductDetails({
           ))}
         </div>
 
-        {onSearch && (
+        {false && onSearch && (
           <button
             onClick={onSearch}
             disabled={isSearching}

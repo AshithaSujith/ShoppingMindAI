@@ -23,6 +23,11 @@ export const STORECOLORS: Record<string, string> = {
   amazon: "#FF9900",
   flipkart: "#2874F0",
   myntra: "#FF3F6C",
+  croma: "#23A455",
+  "reliance digital": "#1D6FE8",
+  reliance: "#1D6FE8",
+  "tata cliq": "#EF3C58",
+  tatacliq: "#EF3C58",
 };
 
 // Rotating palette used to color-code dynamic filter groups and quick chips,
