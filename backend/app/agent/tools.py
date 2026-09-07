@@ -7,7 +7,7 @@ programmatically during their reasoning loops.
 """
 
 from crewai.tools import BaseTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.services.scraper import (
     scrape_amazon,
@@ -27,10 +27,26 @@ from app.services.parser import debug_log
 # ---------------------------------------------------------------------------
 
 class MarketplaceSearchInput(BaseModel):
-    search_query: str = Field(
+    search_query: str | None = Field(
+        default=None,
         description="A concise, marketplace-friendly search query, "
         "e.g. 'Acer 14 inch laptop i3 8GB 256GB SSD'."
     )
+    # Older CrewAI runners emit `query`; newer runners emit `search_query`.
+    query: str | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="after")
+    def normalize_query_field(self):
+        if not self.search_query:
+            self.search_query = self.query
+        if not self.search_query or not self.search_query.strip():
+            raise ValueError("search_query is required")
+        self.search_query = " ".join(self.search_query.split())
+        return self
+
+
+def _resolve_search_query(search_query: str | None, query: str | None) -> str:
+    return " ".join((search_query or query or "").split())
     canonical_product: dict = Field(
         description=(
             "Structured, normalized product description extracted from the "
@@ -79,9 +95,12 @@ class AmazonSearchTool(BaseTool):
 
     def _run(
         self,
-        search_query: str,
-        canonical_product: dict,
+        search_query: str | None = None,
+        canonical_product: dict | None = None,
+        query: str | None = None,
     ) -> str:
+        search_query = _resolve_search_query(search_query, query)
+        canonical_product = canonical_product or {}
         debug_log(f"[AGENT TOOL] amazon_search query='{search_query}'")
         results = scrape_with_fallback(
             scrape_amazon,
@@ -93,8 +112,9 @@ class AmazonSearchTool(BaseTool):
             p for p in results
             if p.get("is_reliable") and p.get("price_inr", 0) > 0
         ]
-        fallback = results[:1] if not reliable else []
-        selected = reliable[:3] or fallback
+        # Never return blocked or zero-price placeholders as products.
+        fallback = []
+        selected = reliable[:3]
         return _serialize_products("Amazon", search_query, selected)
 
 
@@ -111,9 +131,12 @@ class FlipkartSearchTool(BaseTool):
 
     def _run(
         self,
-        search_query: str,
-        canonical_product: dict,
+        search_query: str | None = None,
+        canonical_product: dict | None = None,
+        query: str | None = None,
     ) -> str:
+        search_query = _resolve_search_query(search_query, query)
+        canonical_product = canonical_product or {}
         debug_log(f"[AGENT TOOL] flipkart_search query='{search_query}'")
         results = scrape_with_fallback(
             scrape_flipkart,
@@ -125,8 +148,9 @@ class FlipkartSearchTool(BaseTool):
             p for p in results
             if p.get("is_reliable") and p.get("price_inr", 0) > 0
         ]
-        fallback = results[:1] if not reliable else []
-        selected = reliable[:3] or fallback
+        # Never return blocked or zero-price placeholders as products.
+        fallback = []
+        selected = reliable[:3]
         return _serialize_products("Flipkart", search_query, selected)
 
 
@@ -144,9 +168,12 @@ class CromaSearchTool(BaseTool):
 
     def _run(
         self,
-        search_query: str,
-        canonical_product: dict,
+        search_query: str | None = None,
+        canonical_product: dict | None = None,
+        query: str | None = None,
     ) -> str:
+        search_query = _resolve_search_query(search_query, query)
+        canonical_product = canonical_product or {}
         debug_log(f"[AGENT TOOL] croma_search query='{search_query}'")
         results = scrape_with_fallback(
             scrape_croma,
@@ -158,8 +185,9 @@ class CromaSearchTool(BaseTool):
             p for p in results
             if p.get("is_reliable") and p.get("price_inr", 0) > 0
         ]
-        fallback = results[:1] if not reliable else []
-        selected = reliable[:3] or fallback
+        # Never return blocked or zero-price placeholders as products.
+        fallback = []
+        selected = reliable[:3]
         return _serialize_products("Croma", search_query, selected)
 
 
@@ -177,9 +205,12 @@ class RelianceDigitalSearchTool(BaseTool):
 
     def _run(
         self,
-        search_query: str,
-        canonical_product: dict,
+        search_query: str | None = None,
+        canonical_product: dict | None = None,
+        query: str | None = None,
     ) -> str:
+        search_query = _resolve_search_query(search_query, query)
+        canonical_product = canonical_product or {}
         debug_log(f"[AGENT TOOL] reliance_digital_search query='{search_query}'")
         results = scrape_with_fallback(
             scrape_reliance,
@@ -191,8 +222,9 @@ class RelianceDigitalSearchTool(BaseTool):
             p for p in results
             if p.get("is_reliable") and p.get("price_inr", 0) > 0
         ]
-        fallback = results[:1] if not reliable else []
-        selected = reliable[:3] or fallback
+        # Never return blocked or zero-price placeholders as products.
+        fallback = []
+        selected = reliable[:3]
         return _serialize_products("Reliance Digital", search_query, selected)
 
 
@@ -210,9 +242,12 @@ class TataCliqSearchTool(BaseTool):
 
     def _run(
         self,
-        search_query: str,
-        canonical_product: dict,
+        search_query: str | None = None,
+        canonical_product: dict | None = None,
+        query: str | None = None,
     ) -> str:
+        search_query = _resolve_search_query(search_query, query)
+        canonical_product = canonical_product or {}
         debug_log(f"[AGENT TOOL] tata_cliq_search query='{search_query}'")
         results = scrape_with_fallback(
             scrape_tatacliq,
@@ -224,8 +259,9 @@ class TataCliqSearchTool(BaseTool):
             p for p in results
             if p.get("is_reliable") and p.get("price_inr", 0) > 0
         ]
-        fallback = results[:1] if not reliable else []
-        selected = reliable[:3] or fallback
+        # Never return blocked or zero-price placeholders as products.
+        fallback = []
+        selected = reliable[:3]
         return _serialize_products("Tata CLiQ", search_query, selected)
 
 
@@ -243,9 +279,12 @@ class CrossMarketplaceSearchTool(BaseTool):
 
     def _run(
         self,
-        search_query: str,
-        canonical_product: dict,
+        search_query: str | None = None,
+        canonical_product: dict | None = None,
+        query: str | None = None,
     ) -> str:
+        search_query = _resolve_search_query(search_query, query)
+        canonical_product = canonical_product or {}
         debug_log(f"[AGENT TOOL] cross_marketplace_search query='{search_query}'")
         intent_type = canonical_product.get("intent_type", "main_product")
 
