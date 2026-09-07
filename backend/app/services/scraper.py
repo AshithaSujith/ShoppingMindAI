@@ -1,3 +1,4 @@
+import json
 import re                  # For pattern matching (extracting prices, numbers, codes from text)
 import random              # For adding random delays so we don't look like a bot
 import time                # For adding wait/sleep pauses between page actions
@@ -8,6 +9,26 @@ from playwright.sync_api import sync_playwright  # Playwright controls a real br
 from bs4 import BeautifulSoup
 
 from app.services.zenrows import fetch_html
+
+_AGENT_DEBUG_LOG_PATH = "/Users/mac/orbio/ShoppingMindAI/.cursor/debug-37cb24.log"
+
+
+def _agent_debug_log(location: str, message: str, data: dict, hypothesis_id: str, run_id: str = "pre-fix") -> None:
+    # region agent log
+    try:
+        with open(_AGENT_DEBUG_LOG_PATH, "a", encoding="utf-8") as debug_file:
+            debug_file.write(json.dumps({
+                "sessionId": "37cb24",
+                "location": location,
+                "message": message,
+                "data": data,
+                "hypothesisId": hypothesis_id,
+                "runId": run_id,
+                "timestamp": int(time.time() * 1000),
+            }) + "\n")
+    except Exception:
+        pass
+    # endregion
 
 
 # Keep the synchronous marketplace work within the frontend's scrape timeout.
@@ -435,32 +456,41 @@ def hard_filter(title: str, canonical_product: dict, store: str = "Amazon") -> b
         pt_tokens = set(product_type.split())
         name_tokens = pt_tokens - brand_tokens_set   # Remove brand words from the type
 
-        # Generic words that don't help distinguish products
-        STOP_WORDS = {
-            "masala", "powder", "mix", "sauce", "paste", "oil", "spice", "spices",
-            "food", "product", "item", "pack", "box", "bottle", "pouch",
-            "kg", "g", "ml", "l", "100", "200", "500", "1000",
-            "with", "and", "for", "the", "of", "in", "a",
+        # Generic categories (smartphone, laptop, etc.) are rarely in listing titles.
+        # When the user did not name a brand or model, rely on search relevance instead.
+        generic_types = {
+            "smartphone", "phone", "mobile", "mobile phone", "tablet",
+            "laptop", "notebook", "tv", "television",
         }
-        distinctive = name_tokens - STOP_WORDS   # Only keep words that are truly distinctive
+        if product_type in generic_types and not brand and not has_model:
+            pass
+        else:
+            # Generic words that don't help distinguish products
+            STOP_WORDS = {
+                "masala", "powder", "mix", "sauce", "paste", "oil", "spice", "spices",
+                "food", "product", "item", "pack", "box", "bottle", "pouch",
+                "kg", "g", "ml", "l", "100", "200", "500", "1000",
+                "with", "and", "for", "the", "of", "in", "a",
+            }
+            distinctive = name_tokens - STOP_WORDS   # Only keep words that are truly distinctive
 
-        if distinctive:
-            # All distinctive words must appear in the title
-            category_terms = get_category_evidence(canonical_product)
-            evidence_present = any(
-                set(term.split()).issubset(tokens) for term in category_terms
-            )
-            # Do not maintain a hardcoded synonym dictionary. If the intent
-            # model supplied dynamic category evidence, enforce it; otherwise
-            # leave category wording as a soft signal and rely on brand/model,
-            # variant, price, and marketplace relevance checks.
-            missing = [
-                tok for tok in distinctive
-                if tok not in tokens and not evidence_present
-            ]
-            if missing:
-                print(f"    [HARD FILTER] Product name mismatch (missing {missing}): '{title[:60]}'")
-                return False
+            if distinctive:
+                # All distinctive words must appear in the title
+                category_terms = get_category_evidence(canonical_product)
+                evidence_present = any(
+                    set(term.split()).issubset(tokens) for term in category_terms
+                )
+                # Do not maintain a hardcoded synonym dictionary. If the intent
+                # model supplied dynamic category evidence, enforce it; otherwise
+                # leave category wording as a soft signal and rely on brand/model,
+                # variant, price, and marketplace relevance checks.
+                missing = [
+                    tok for tok in distinctive
+                    if tok not in tokens and not evidence_present
+                ]
+                if missing:
+                    print(f"    [HARD FILTER] Product name mismatch (missing {missing}): '{title[:60]}'")
+                    return False
 
     # ── CHECK 5: STORAGE ─────────────────────────────────────────────────
     storage_raw = (canonical_product.get("storage") or
@@ -703,6 +733,17 @@ def calculate_match_score(title: str, canonical_product: dict, store: str = "Ama
         if is_combo_listing(title, canonical_product):
             score -= 100
 
+    # Broad category searches (e.g. "Android phone under 30K") often lack
+    # brand/model fields, so scoring stays at 0 even for valid listings.
+    # Grant a baseline when hard_filter already passed and constraints are few.
+    filled = sum(
+        1 for f in ["brand", "product_type", "variant", "model", "storage",
+                    "size", "flavor", "gender", "color", "shoe_size", "ram", "resolution"]
+        if canonical_product.get(f)
+    )
+    if score < 25 and filled <= 1:
+        score = 25
+
     return score
 
 
@@ -771,6 +812,18 @@ def parse_price(raw: str) -> float:
         return val if val >= MIN_VALID_PRICE else 0.0                 # Return 0 if suspiciously low
     except Exception:
         return 0.0
+
+
+def parse_card_price(raw: str) -> float:
+    """Prefer explicit INR currency values over incidental numbers such as '45W'."""
+    currency_matches = re.findall(
+        r"(?:₹|rs\.?|inr)\s*([\d,]+(?:\.\d+)?)",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if currency_matches:
+        return parse_price(currency_matches[0])
+    return parse_price(raw)
 
 
 # =========================================================
@@ -1089,6 +1142,35 @@ def launch_browser(p):
     return browser, context
 
 
+def _croma_default_pincode() -> str:
+    pincode = os.getenv("CROMA_PINCODE", "400049").strip()
+    if not re.fullmatch(r"\d{6}", pincode):
+        return "400049"
+    return pincode
+
+
+def _croma_search_url(query: str) -> str:
+    return "https://www.croma.com/searchB?text=" + query.replace(" ", "+")
+
+
+def _seed_croma_location(context, page) -> str:
+    """Croma hides PLP results until a delivery pincode is stored in cookies/localStorage."""
+    pincode = _croma_default_pincode()
+    context.add_cookies([
+        {
+            "name": "localStoragePincode",
+            "value": pincode,
+            "domain": ".croma.com",
+            "path": "/",
+        },
+    ])
+    page.add_init_script(
+        f"localStorage.setItem('3hrPincode', '{pincode}');"
+        f"localStorage.setItem('cityName', 'Mumbai');"
+    )
+    return pincode
+
+
 def make_empty_result(store, query, message=None):
     """Return no products for blocked, unavailable, or empty marketplace pages."""
     if message:
@@ -1115,7 +1197,7 @@ def _zenrows_products(url, canonical_product, store, query):
         "Flipkart": ("/p/",),
         "Croma": ("/p/",),
         "Reliance Digital": ("/p/", "/buy/"),
-        "Tata CLiQ": ("/product-detail/", "/pd/"),
+        "Tata CLiQ": ("/product-detail/", "/pd/", "/p-"),
     }.get(store, ())
 
     for link in soup.select("a[href]"):
@@ -1530,17 +1612,50 @@ def scrape_croma(query, canonical_product, intent_type="main_product", debug_tit
     """Scrape Croma search cards into the shared product schema."""
     query = sanitize_search_query(query)
     products = []
+    search_url = _croma_search_url(query)
+    pincode = _croma_default_pincode()
     with sync_playwright() as p:
         browser, context = launch_browser(p)
         page = context.new_page()
         try:
-            page.goto("https://www.croma.com/searchB?q=" + query.replace(" ", "%20"), timeout=SCRAPER_NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
-            page.wait_for_timeout(2500)
+            pincode = _seed_croma_location(context, page)
+            page.goto(search_url, timeout=SCRAPER_NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
+            try:
+                page.wait_for_selector("li.product-item", timeout=SCRAPER_SELECTOR_TIMEOUT_MS)
+            except Exception:
+                page.wait_for_timeout(3000)
 
             page_title = page.title().lower()
-            if any(word in page_title for word in ("captcha", "access denied", "blocked", "robot")):
+            blocked = any(word in page_title for word in ("captcha", "access denied", "blocked", "robot"))
+            # region agent log
+            _agent_debug_log(
+                "scraper.py:scrape_croma",
+                "Croma page loaded",
+                {
+                    "search_url": search_url,
+                    "pincode": pincode,
+                    "page_title": page.title(),
+                    "page_url": page.url,
+                    "blocked": blocked,
+                    "body_text_len": page.evaluate("document.body ? document.body.innerText.length : 0"),
+                },
+                "H6",
+                run_id="post-fix",
+            )
+            # endregion
+            if blocked:
                 print(f"CROMA BLOCKED: {page.title()}")
-                return make_empty_result("Croma", query, "Croma is temporarily blocking automated search.")
+                fallback = _zenrows_products(search_url, canonical_product, "Croma", query)
+                # region agent log
+                _agent_debug_log(
+                    "scraper.py:scrape_croma",
+                    "Croma blocked ZenRows fallback",
+                    {"fallback_count": len(fallback or []), "search_url": search_url},
+                    "H2",
+                    run_id="post-fix",
+                )
+                # endregion
+                return fallback or make_empty_result("Croma", query, "Croma is temporarily blocking automated search.")
 
             card_selectors = [
                 "li.product-item",
@@ -1551,33 +1666,68 @@ def scrape_croma(query, canonical_product, intent_type="main_product", debug_tit
                 "a[href*='/p/']",
             ]
             cards = []
+            matched_selector = ""
             for selector in card_selectors:
                 cards = page.query_selector_all(selector)
                 if cards:
+                    matched_selector = selector
                     print(f"CROMA CARDS: {len(cards)} via {selector}")
                     break
 
             if not cards:
                 print(f"CROMA NO PRODUCT CARDS: title={page.title()} url={page.url}")
-                fallback = _zenrows_products(page.url, canonical_product, "Croma", query)
-                return fallback or make_empty_result("Croma", query, "No Croma product cards were available for this search.")
+                fallback = _zenrows_products(search_url, canonical_product, "Croma", query)
+                # region agent log
+                _agent_debug_log(
+                    "scraper.py:scrape_croma",
+                    "Croma no cards ZenRows fallback",
+                    {
+                        "fallback_count": len(fallback or []),
+                        "page_title": page.title(),
+                        "search_url": search_url,
+                        "pincode": pincode,
+                    },
+                    "H8",
+                    run_id="post-fix",
+                )
+                # endregion
+                return fallback or make_empty_result(
+                    "Croma",
+                    query,
+                    "No Croma product cards were available for this search. Set CROMA_PINCODE if delivery location is missing.",
+                )
             for card in cards[:25]:
                 text = card.inner_text().strip()
                 title_el = card.query_selector("h3, h2, a[title]")
                 title = ((title_el.get_attribute("title") if title_el else "") or (title_el.inner_text() if title_el else "")).strip()
-                price = parse_price(text)
+                price = parse_card_price(text)
                 if not title or not price or not validate_price(price, canonical_product):
                     continue
                 score = calculate_match_score(title, canonical_product, store="Croma")
                 if score < get_minimum_score(canonical_product):
                     continue
-                link_el = card.query_selector("a[href]")
+                link_el = card.query_selector("a[href*='/p/'], a[href]")
                 href = link_el.get_attribute("href") if link_el else ""
                 products.append({"product_name": title, "price_inr": price, "original_price": 0,
                     "discount_percent": 0, "store": "Croma", "delivery_days": 0, "delivery_label": "",
                     "rating": 0, "review_count": 0, "offer": "", "stock_status": "In Stock",
                     "is_reliable": True, "image": "", "product_link": href if href and href.startswith("http") else "https://www.croma.com" + (href or ""),
                     "match_score": score, "is_best_price": False})
+            # region agent log
+            _agent_debug_log(
+                "scraper.py:scrape_croma",
+                "Croma scrape complete",
+                {
+                    "matched_selector": matched_selector,
+                    "card_count": len(cards),
+                    "product_count": len(products),
+                    "search_url": search_url,
+                    "pincode": pincode,
+                },
+                "H3",
+                run_id="post-fix",
+            )
+            # endregion
         except Exception as error:
             print(f"CROMA SCRAPE ERROR: {error}")
         finally:
@@ -1863,54 +2013,97 @@ def scrape_tatacliq(query, canonical_product, intent_type="main_product", debug_
             url = "https://www.tatacliq.com/search?q=" + query.replace(" ", "+")
             page.goto(url, timeout=SCRAPER_NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
             page.wait_for_timeout(3000)
+            try:
+                page.click("text=No, Thanks", timeout=1500)
+            except Exception:
+                pass
 
             page_title = page.title().lower()
-            if any(word in page_title for word in ("captcha", "access denied", "blocked", "robot", "attention required")):
+            blocked = any(word in page_title for word in ("captcha", "access denied", "blocked", "robot", "attention required"))
+            # region agent log
+            _agent_debug_log(
+                "scraper.py:scrape_tatacliq",
+                "TataCliq page loaded",
+                {
+                    "page_title": page.title(),
+                    "page_url": page.url,
+                    "blocked": blocked,
+                    "body_text_len": page.evaluate("document.body ? document.body.innerText.length : 0"),
+                },
+                "H4",
+            )
+            # endregion
+            if blocked:
                 print(f"TATACLIQ BLOCKED: {page.title()}")
                 return make_empty_result("Tata CLiQ", query, "Tata CLiQ is temporarily blocking automated search.")
 
-            # Tata CLiQ product card selectors
+            # Tata CLiQ product card selectors (current React PLP layout)
             card_selectors = [
+                "[class*='ProductModule__base']",
+                "[class*='ProductGrid__base'] div[class*='ProductModule__base']",
                 "div.product-card",
                 "div[class*='ProductCard']",
                 "div[class*='productCard']",
                 "li.product-card",
                 "div[class*='product_tile']",
                 "[data-testid*='productCard']",
-                "a[class*='product']",
             ]
             cards = []
+            matched_selector = ""
             for selector in card_selectors:
                 cards = page.query_selector_all(selector)
                 if cards:
+                    matched_selector = selector
                     print(f"TATACLIQ CARDS: {len(cards)} via {selector}")
                     break
 
             if not cards:
                 # Fallback: search for product listing links
-                fallback_links = page.query_selector_all("a[href*='/product-detail/'], a[href*='/pd/']")
+                fallback_links = page.query_selector_all("a[href*='/p-']")
                 if fallback_links:
-                    cards = [el for el in fallback_links if el.query_selector("h3, h4, span, p, img")]
+                    cards = [el for el in fallback_links if el.query_selector("img, [class*='content'], h3, h4, span, p")]
+                    matched_selector = "a[href*='/p-']"
                     print(f"TATACLIQ FALLBACK CARDS: {len(cards)} via product links")
 
             if not cards:
                 print(f"TATACLIQ NO PRODUCT CARDS: title={page.title()} url={page.url}")
                 fallback = _zenrows_products(page.url, canonical_product, "Tata CLiQ", query)
+                # region agent log
+                _agent_debug_log(
+                    "scraper.py:scrape_tatacliq",
+                    "TataCliq no cards ZenRows fallback",
+                    {"fallback_count": len(fallback or []), "page_title": page.title()},
+                    "H2",
+                )
+                # endregion
                 return fallback or make_empty_result("Tata CLiQ", query, "No Tata CLiQ product cards were available for this search.")
 
+            skipped_no_title = 0
+            skipped_no_price = 0
+            skipped_score = 0
             for card in cards[:25]:
                 text = card.inner_text().strip()
-                title_el = card.query_selector("h3, h4, [class*='title'], [class*='name'], a[title]")
+                title_el = card.query_selector(
+                    "[class*='ProductModule__content'], [class*='title'], [class*='name'], h3, h4, a[title], a[href*='/p-']"
+                )
                 title = ""
                 if title_el:
                     title = (title_el.get_attribute("title") or "").strip() or title_el.inner_text().strip()
-                price = parse_price(text)
-                if not title or not price or not validate_price(price, canonical_product):
+                if not title:
+                    lines = [line.strip() for line in text.splitlines() if line.strip()]
+                    title = lines[1] if len(lines) > 1 else (lines[0] if lines else "")
+                price = parse_card_price(text)
+                if not title:
+                    skipped_no_title += 1
+                    continue
+                if not price or not validate_price(price, canonical_product):
+                    skipped_no_price += 1
                     continue
                 score = calculate_match_score(title, canonical_product, store="Tata CLiQ")
                 if score < get_minimum_score(canonical_product):
+                    skipped_score += 1
                     continue
-                link_el = card.query_selector("a[href]")
+                link_el = card.query_selector("a[href*='/p-'], a[href]")
                 href = link_el.get_attribute("href") if link_el else ""
                 # Extract rating
                 rating_el = card.query_selector("[class*='rating'], [class*='stars'], [class*='Rating']")
@@ -1923,6 +2116,21 @@ def scrape_tatacliq(query, canonical_product, intent_type="main_product", debug_
                     "rating": rating, "review_count": 0, "offer": "", "stock_status": "In Stock",
                     "is_reliable": True, "image": "", "product_link": href if href and href.startswith("http") else "https://www.tatacliq.com" + (href or ""),
                     "match_score": score, "is_best_price": False})
+            # region agent log
+            _agent_debug_log(
+                "scraper.py:scrape_tatacliq",
+                "TataCliq scrape complete",
+                {
+                    "matched_selector": matched_selector,
+                    "card_count": len(cards),
+                    "product_count": len(products),
+                    "skipped_no_title": skipped_no_title,
+                    "skipped_no_price": skipped_no_price,
+                    "skipped_score": skipped_score,
+                },
+                "H5",
+            )
+            # endregion
         except Exception as error:
             print(f"TATACLIQ SCRAPE ERROR: {error}")
         finally:

@@ -34,6 +34,15 @@ class MarketplaceSearchInput(BaseModel):
     )
     # Older CrewAI runners emit `query`; newer runners emit `search_query`.
     query: str | None = Field(default=None, exclude=True)
+    canonical_product: dict = Field(
+        default_factory=dict,
+        description=(
+            "Structured, normalized product description extracted from the "
+            "user's request. Keys can include: brand, model, product_type, "
+            "ram, storage, screen_size, budget, max_price, color, and any "
+            "other confirmed spec. Pass {} when nothing is confirmed yet."
+        ),
+    )
 
     @model_validator(mode="after")
     def normalize_query_field(self):
@@ -47,14 +56,6 @@ class MarketplaceSearchInput(BaseModel):
 
 def _resolve_search_query(search_query: str | None, query: str | None) -> str:
     return " ".join((search_query or query or "").split())
-    canonical_product: dict = Field(
-        description=(
-            "Structured, normalized product description extracted from the "
-            "user's request. Keys can include: brand, model, product_type, "
-            "ram, storage, screen_size, budget, max_price, color, and any "
-            "other confirmed spec. Pass {} when nothing is confirmed yet."
-        )
-    )
 
 
 class PriceComparisonInput(BaseModel):

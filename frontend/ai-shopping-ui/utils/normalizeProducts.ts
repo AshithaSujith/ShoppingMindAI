@@ -13,13 +13,18 @@ export const normalizeProducts = (
     const value = (camelCase: string, snakeCase: string) =>
       product[camelCase] ?? product[snakeCase]
 
+    const plainPrice = product.price ?? product.Price;
+    const plainLink = product.link ?? product.Link;
+
     return {
       ...product,
-      priceinr: toNumber(value("priceinr", "price_inr")),
+      priceinr: toNumber(value("priceinr", "price_inr") ?? plainPrice),
       originalprice: toNumber(value("originalprice", "original_price")),
       discountpercent: toNumber(value("discountpercent", "discount_percent")),
-      productname: value("productname", "product_name") as string | undefined,
-      productlink: value("productlink", "product_link") as string | undefined,
+      productname: (value("productname", "product_name") || product.title) as string | undefined,
+      title: (product.title || value("productname", "product_name")) as string | undefined,
+      productlink: (value("productlink", "product_link") || plainLink) as string | undefined,
+      url: (plainLink || value("productlink", "product_link")) as string | undefined,
       reviewcount: toNumber(value("reviewcount", "review_count")),
       rating: toNumber(product.rating),
       deliverylabel: value("deliverylabel", "delivery_label") as string | undefined,
