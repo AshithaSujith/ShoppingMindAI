@@ -33,9 +33,13 @@ export default function FilterSidebar({
   // Whenever the backend sends a new set of dynamic filters (i.e. a new search),
   // reset all local selection/input state so stale selections don't linger.
   useEffect(() => {
-    setSelected({})
-    setCustomInputs({})
-    setShowCustomInput({})
+    const resetId = window.setTimeout(() => {
+      setSelected({})
+      setCustomInputs({})
+      setShowCustomInput({})
+    }, 0)
+
+    return () => window.clearTimeout(resetId)
   }, [dynamicFilters])
 
   // Toggles a single chip value on/off within its filter group.
@@ -43,7 +47,11 @@ export default function FilterSidebar({
     setSelected((prev) => {
       const next = { ...prev }
       const groupSet = new Set(prev[group] || [])
-      groupSet.has(value) ? groupSet.delete(value) : groupSet.add(value)
+      if (groupSet.has(value)) {
+        groupSet.delete(value)
+      } else {
+        groupSet.add(value)
+      }
       next[group] = groupSet
       return next
     })
