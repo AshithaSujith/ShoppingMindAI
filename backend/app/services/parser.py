@@ -52,7 +52,9 @@ def normalize_text(value):
 
 
 def debug_log(message: str):
-    print(f"[DEBUG] {message}")
+    # Uvicorn's reload worker can pipe stdout on Windows; explicitly flushing
+    # keeps request traces visible in the terminal as they happen.
+    print(f"[DEBUG] {message}", flush=True)
 
 
 # =========================================================

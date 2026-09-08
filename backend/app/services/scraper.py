@@ -185,7 +185,7 @@ def get_category_evidence(canonical_product: dict) -> set[str]:
 def get_product_evidence(canonical_product: dict) -> set[str]:
     """Return dynamic product/category phrases from the intent response."""
     values = []
-    for key in ("product", "product_name", "category_terms"):
+    for key in ("name", "product", "product_name", "category_terms"):
         value = canonical_product.get(key, [])
         values.extend(value if isinstance(value, (list, tuple, set)) else [value])
     return {normalize_text(value) for value in values if normalize_text(value)}
@@ -636,9 +636,16 @@ def calculate_match_score(title: str, canonical_product: dict, store: str = "Ama
     tokens = set(t.split())
     evidence = get_product_evidence(canonical_product)
     if evidence:
-        matches = [term for term in evidence if set(term.split()).issubset(tokens)]
-        if matches:
-            score += min(60, max(25, max(len(term.split()) for term in matches) * 20))
+        evidence_scores = []
+        for term in evidence:
+            term_tokens = set(term.split())
+            if not term_tokens:
+                continue
+            overlap = len(term_tokens & tokens) / len(term_tokens)
+            if overlap >= 0.5:
+                evidence_scores.append(int(overlap * 60))
+        if evidence_scores:
+            score += max(25, min(60, max(evidence_scores)))
 
     # +60 points if product type matches (e.g. "smartphone", "shoes")
     product_type = normalize_text(canonical_product.get("product_type", ""))

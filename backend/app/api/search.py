@@ -1,11 +1,14 @@
+"""Search and scraping endpoints for ShoppingMindAI."""
+
 import asyncio
 import json
 import logging
+import os
+import re
 
 from fastapi import APIRouter
 
 from app.schemas.requests import SearchRequest, ScrapeRequest
-
 from app.services.parser import debug_log
 from app.services.scraper import (
     scrape_amazon,
@@ -15,7 +18,6 @@ from app.services.scraper import (
     scrape_tatacliq,
     scrape_with_fallback,
 )
-
 from app.services.chatbot import ChatBot
 from app.services.recommendation import get_product_advice
 from app.agent.crew import run_crew_for_turn
@@ -70,50 +72,48 @@ def _record_assistant_reply(session_id, query, assistant_message, state_snapshot
 
 
 def _normalize_canonical_product(payload: dict) -> dict:
-    """Normalize the crew's canonical_product to match the scraper's key style."""
+    """Normalize model field names and values to the scraper contract."""
     raw = payload.get("canonical_product", {}) or {}
-    normalized = {
-        k: (v[0] if isinstance(v, list) and v else v)
-        for k, v in raw.items()
-        if v is not None and str(v).strip().lower() not in ("no preference", "", "none")
+    key_map = {
+        "producttype": "product_type", "type": "product_type", "category": "product_type",
+        "subcategory": "product_type", "brandname": "brand", "brand": "brand",
+        "modelname": "model", "model": "model", "screensize": "size", "screen": "size",
+        "size": "size", "ram": "ram", "storage": "storage", "colour": "color",
+        "color": "color", "maxprice": "max_price", "price": "max_price",
+        "budget": "max_price", "maxbudget": "max_price",
     }
-    # Normalize category labels so plural UI options match product-title tokens.
-    product_type = str(normalized.get("product_type", "")).strip().lower()
-    category_aliases = {
-        "smartphones": "smartphone",
-        "mobiles": "mobile phone",
-        "laptops": "laptop",
-        "headphones": "headphone",
-        "earbuds": "earbud",
-        "televisions": "television",
-        "tvs": "television",
-        "refrigerators": "refrigerator",
-        "fridges": "refrigerator",
-        "washing machines": "washing machine",
-    }
-    if product_type in category_aliases:
-        normalized["product_type"] = category_aliases[product_type]
+    normalized = {}
+    for raw_key, value in raw.items():
+        if value is None:
+            continue
+        value = value[0] if isinstance(value, list) and value else value
+        if str(value).strip().casefold() in {"", "none", "no preference", "any", "any brand"}:
+            continue
+        compact_key = re.sub(r"[^a-z0-9]", "", str(raw_key).casefold())
+        key = key_map.get(compact_key, str(raw_key).strip())
+        normalized[key] = value
 
-    # Copy price info into fields the scraper's filters expect
-    max_price = normalized.pop("max_price", None) or normalized.pop("Max price", None)
-    if max_price:
-        normalized["max_price"] = str(max_price)
+    product_type = str(normalized.get("product_type", "")).strip().lower()
+    if product_type:
+        cleaned = re.sub(r"[^a-z0-9\s]", " ", product_type)
+        normalized["product_type"] = re.sub(r"\s+", " ", cleaned).strip()
+
+    max_price = normalized.get("max_price")
+    if max_price is not None:
+        numbers = re.findall(r"\d+(?:\.\d+)?", str(max_price).replace(",", ""))
+        if numbers:
+            normalized["max_price"] = str(max(float(number) for number in numbers))
     return normalized
 
 
 @router.post("/search")
 async def search(payload: SearchRequest):
-    """Route the user's message through the CrewAI agent crew.
-
-    The crew returns a structured JSON payload matching the same frontend
-    contract as the original pipeline: type in
-    {text, conversation, parsed_query, results}, plus the scraper triggers
-    search_query / canonical_product when type == parsed_query.
-    """
+    """Route the user's message through the CrewAI agent crew."""
     try:
         query = payload.query.strip()
         session_id = payload.session_id
 
+        print(f"[API] POST /search session={session_id} query={query!r}", flush=True)
         debug_log(f"\n{'=' * 50}")
         debug_log(f"AGENT USER [{session_id}]: {query}")
 
@@ -166,10 +166,13 @@ async def search(payload: SearchRequest):
                     "status": "success",
                     "data": {
                         "type": "parsed_query",
+                        "message": assistant_message,
                         "search_query": search_query,
                         "canonical_product": canonical_product,
                         "filters": result.get("filters", {}),
+                        "cards": result.get("cards", []),
                         "intent_type": result.get("intent_type", "main_product"),
+                        "search_now": bool(result.get("search_now", True)),
                         "loading": loading,
                     },
                 }
@@ -187,7 +190,6 @@ async def search(payload: SearchRequest):
                 },
             }
 
-        # conversation | text | chat — all map to a conversational reply
         _record_assistant_reply(session_id, query, assistant_message)
         return {
             "status": "success",
@@ -214,20 +216,17 @@ async def search(payload: SearchRequest):
 
 @router.post("/scrape")
 async def scrape(payload: ScrapeRequest):
-    """Direct scraper endpoint — deterministic logic, still used by the
-    frontend 'Search Products' button and runnable as a standalone tool."""
+    """Direct scraper endpoint — used by the frontend 'Search Products' button."""
     try:
         search_query = payload.search_query
         canonical_product = payload.canonical_product
 
+        print(f"[API] POST /scrape query={search_query!r}", flush=True)
         intent_type = canonical_product.get("intent_type", "main_product")
 
         debug_log(f"\n{'=' * 60}")
         debug_log(f"SCRAPING: {search_query}")
 
-        # Playwright-based scrapers are synchronous, so run every dedicated
-        # marketplace scraper in its own worker thread. This keeps FastAPI
-        # responsive and makes all five marketplace agents active in this path.
         marketplaces = [
             ("Amazon", scrape_amazon),
             ("Flipkart", scrape_flipkart),
@@ -253,22 +252,26 @@ async def scrape(payload: ScrapeRequest):
                 debug_log(f"MARKETPLACE ERROR: {store_name}: {exc}")
                 return store_name, []
 
-        # ScrapeOps Proxy API plans can have a low concurrency limit. Run the
-        # five stores sequentially so one request does not cause 429 failures
-        # for the remaining marketplaces.
-        marketplace_results = {}
-        for name, scraper in marketplaces:
-            store_name, results = await run_marketplace(name, scraper)
-            marketplace_results[store_name] = results
+        concurrency = max(1, int(os.getenv("MARKETPLACE_CONCURRENCY", "5")))
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def bounded_marketplace(name, scraper):
+            async with semaphore:
+                return await run_marketplace(name, scraper)
+
+        marketplace_pairs = await asyncio.gather(
+            *(bounded_marketplace(name, scraper) for name, scraper in marketplaces)
+        )
+        marketplace_results = dict(marketplace_pairs)
         all_products = []
         for store_name, results in marketplace_results.items():
             reliable = [
                 p for p in results
-                if p.get("is_reliable") and p.get("price_inr", 0) > 0
+                if p.get("is_reliable", True) and p.get("price_inr", 0) > 0
             ]
-            selected = reliable[:3] or results[:1]
+            selected = reliable[:3] if reliable else [p for p in results if p.get("price_inr", 0) > 0][:3]
             all_products.extend(selected)
-            debug_log(f"MARKETPLACE RESULTS: {store_name}: {len(selected)} returned")
+            debug_log(f"MARKETPLACE RESULTS: {store_name}: {len(selected)} reliable products returned")
 
         if all_products:
             priced = [p for p in all_products if p.get("price_inr", 0) > 0]

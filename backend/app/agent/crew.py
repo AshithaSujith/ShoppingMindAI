@@ -197,10 +197,11 @@ def build_crew(session_id: str, user_query: str, conversation_history: str = "",
             "4. Specific request with at least one concrete constraint "
             "(brand, model, budget, spec, or explicit 'search now') -> "
             "state=parsed_query, search_now=true, search_query=<cleaned query>\n\n"
-            "When useful, include category_terms inside canonical_product as a "
-            "short list of category wording commonly used in marketplace titles. "
-            "Derive these terms from the request and context; do not use a fixed "
-            "global synonym list.\n\n"
+            "When useful, include category_terms inside canonical_product as a short list of "
+            "category wording commonly used in marketplace titles. Always set "
+            "canonical_product[\"product_type\"] explicitly (e.g. \"smartphone\", \"laptop\"), "
+            "never only category_terms. Derive these terms from the request and context; do not "
+            "use a fixed global synonym list.\n\n"
             "Also classify user_mode:\n"
             "- expert: user gave a concrete brand, model, budget, or spec\n"
             "- exploratory: user named only a category\n\n"
@@ -622,7 +623,7 @@ async def run_crew_for_turn(session_id: str, user_query: str, conversation_histo
         # Scrape all 5 marketplaces concurrently (no LLM), then only the
         # comparison/negotiation/advisor agents run, on real data.
         search_query = inputs["search_query"]
-        canonical_product = intent_payload.get("canonical_product", {})
+        canonical_product = _canonical_product_for_scraping(intent_payload)
         _trace("SCRAPE START", {"search_query": search_query, "canonical_product": canonical_product})
         scraped = await _scrape_all_marketplaces(search_query, canonical_product)
         for key, result in scraped.items():
@@ -730,3 +731,25 @@ def _parse_advisor_output(raw: str) -> dict:
     value = _parse_json(raw, {"fallback": True, "message": raw})
     value["fallback"] = False if "type" in value else True
     return value
+
+def _canonical_product_for_scraping(intent_payload: dict) -> dict:
+    """Merge dynamic intent evidence and budget filters for the scrapers."""
+    canonical = dict(intent_payload.get("canonical_product") or {})
+
+    # The intent router sometimes emits "category" instead of "product_type".
+    # Every scoring/price-bounds function in scraping_utils.py only reads
+    # product_type, so alias it here — cheap, and doesn't depend on the LLM
+    # reliably following prompt wording every time.
+    if not canonical.get("product_type") and canonical.get("category"):
+        canonical["product_type"] = canonical["category"]
+
+    filters = intent_payload.get("filters") or {}
+    price_values = filters.get("Price Range") or filters.get("Budget") or []
+    if isinstance(price_values, str):
+        price_values = [price_values]
+    for value in price_values:
+        numbers = re.findall(r"\d[\d,]*", str(value))
+        if numbers and re.search(r"up to|under|below|less than|maximum", str(value), re.I):
+            canonical["max_price"] = max(float(number.replace(",", "")) for number in numbers)
+            break
+    return canonical

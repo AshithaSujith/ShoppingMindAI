@@ -36,8 +36,15 @@ if settings["auto_create_tables"]:
         # temporarily unavailable; readiness reports the degraded state.
         logger.exception("Database table creation skipped during startup")
 
-allowed_hosts = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if host.strip()]
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or ["localhost", "127.0.0.1"])
+allowed_hosts = [
+    host.strip()
+    for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,0.0.0.0").split(",")
+    if host.strip()
+]
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=allowed_hosts or ["localhost", "127.0.0.1", "0.0.0.0"],
+)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
