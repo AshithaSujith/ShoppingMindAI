@@ -327,5 +327,5 @@ Distributed under the MIT License. See `LICENSE` for more information.
 ---
 
 <p align="center">
-  Built with ❤️ by <a href="https://github.com/AshithaSujith">Ashitha Sujith</a>
+  Built by <a href="https://github.com/AshithaSujith">Ashitha Sujith</a>
 </p>
