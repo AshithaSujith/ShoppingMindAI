@@ -1,1 +1,13 @@
 .cursor/
+.env
+.env.local
+*.db
+*.sqlite
+*.sqlite3
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.log
+backend/tests/*.html
+backend/tests/*.json
