@@ -1,10 +1,6 @@
 # 🛍️ ShoppingMindAI
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/AshithaSujith/ShoppingMindAI/main/frontend/ai-shopping-ui/public/shoppingmind-banner.png" alt="ShoppingMindAI Banner" width="100%" onerror="this.style.display='none'"/>
-</p>
-
-<p align="center">
   <strong>An Intelligent Multi-Agent Shopping Assistant & Real-Time Price Comparison Engine</strong>
 </p>
 
